@@ -1,118 +1,102 @@
+import logging
+from typing import List, Dict, Union
 import chromadb
 from chromadb.config import Settings
-from typing import List, Dict, Optional
-import logging
+from chromadb.utils import embedding_functions
 import numpy as np
-import os
+from ..utils.logger import setup_logging
 
-logging.basicConfig(level=logging.INFO, force=True)
+# Setup logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
 class VectorStore:
-    def __init__(self, persist_dir: str = "D:/autonomous_research_assistant/data/vectorstore"):
-        self.persist_dir = persist_dir
+    def __init__(self, persist_dir: str = "D:/autonomous_research_assistant/data/vectorstore", 
+                 embedding_model_name: str = "all-mpnet-base-v2"):
         logger.info(f"Initializing ChromaDB with persist_dir: {persist_dir}")
         logger.info(f"ChromaDB version: {chromadb.__version__}")
-        # Ensure persist_dir exists and is writable
-        os.makedirs(persist_dir, exist_ok=True)
-        if not os.access(persist_dir, os.W_OK):
-            logger.error(f"Persist directory {persist_dir} is not writable")
-            raise PermissionError(f"Cannot write to {persist_dir}")
-        self.client = chromadb.PersistentClient(
-            path=persist_dir,
-            settings=Settings(
-                anonymized_telemetry=False
-            )
+        logger.info(f"Using embedding model: {embedding_model_name}")
+        
+        self.client = chromadb.PersistentClient(path=persist_dir, settings=Settings())
+        self.collection_name = "research_assistant"
+        
+        # Create embedding function that matches your EmbeddingModel
+        self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name=embedding_model_name
         )
-        # Explicitly delete and recreate collection to ensure clean state
+        
+        # Delete existing collection to ensure clean state
         try:
-            self.client.delete_collection("research_assistant")
-            logger.info("Deleted existing research_assistant collection")
-        except:
-            logger.info("No existing research_assistant collection to delete")
+            self.client.delete_collection(name=self.collection_name)
+            logger.info(f"Deleted existing {self.collection_name} collection")
+        except Exception:
+            logger.info(f"No existing {self.collection_name} collection to delete")
+        
+        # Create new collection with custom embedding function
         self.collection = self.client.create_collection(
-            name="research_assistant",
-            metadata={"hnsw:space": "cosine", "description": "Research content embeddings"}
+            name=self.collection_name,
+            embedding_function=self.embedding_function
         )
-        logger.info("ChromaDB collection created")
+        logger.info(f"ChromaDB collection created with {embedding_model_name} embeddings")
 
-    async def add_texts(
-        self,
-        texts: List[str],
-        embeddings: List[List[float]],
-        metadatas: Optional[List[Dict]] = None,
-        ids: Optional[List[str]] = None
-    ) -> List[str]:
+    def delete_collection(self):
+        """Delete the research_assistant collection."""
         try:
-            if not ids:
-                ids = [str(i) for i in range(len(texts))]
-            
-            logger.info(f"Adding {len(texts)} documents to vectorstore")
-            logger.info(f"First document preview: {texts[0][:100]}...")
-            logger.info(f"First embedding norm: {np.linalg.norm(embeddings[0])}")
-            
-            # Validate metadata
-            metadatas = metadatas if metadatas else [{}] * len(texts)
-            if len(metadatas) != len(texts):
-                logger.error(f"Metadata length {len(metadatas)} does not match texts length {len(texts)}")
-                return []
-            
+            self.client.delete_collection(name=self.collection_name)
+            logger.info(f"Deleted {self.collection_name} collection")
+            # Recreate immediately to keep object valid
+            self.collection = self.client.create_collection(
+                name=self.collection_name,
+                embedding_function=self.embedding_function
+            )
+            logger.info(f"Recreated {self.collection_name} collection")
+        except Exception as e:
+            logger.error(f"Error in delete_collection: {str(e)}")
+
+    async def add_texts(self, texts: List[str], metadata: List[Dict] = None) -> List[str]:
+        logger.info(f"Adding {len(texts)} documents to vectorstore")
+        logger.info(f"First document preview: {texts[0][:50]}..." if texts else "No documents provided")
+        
+        # Ensure metadata matches texts length
+        if metadata is None:
+            metadata = [{}] * len(texts)
+        
+        try:
             self.collection.add(
                 documents=texts,
-                embeddings=embeddings,
-                metadatas=metadatas,
-                ids=ids
+                metadatas=metadata,
+                ids=[str(i) for i in range(len(texts))]
             )
-            
-            # Verify collection state
-            count = self.collection.count()
-            logger.info(f"Collection now has {count} documents")
-            # Log stored data for debugging
-            stored_data = self.collection.get()
-            logger.info(f"Stored documents after add: {stored_data['documents']}")
-            logger.info(f"Stored IDs after add: {stored_data['ids']}")
-            
+            logger.info(f"Collection now has {self.collection.count()} documents")
             logger.info(f"Successfully added {len(texts)} documents")
-            return ids
+            return [str(i) for i in range(len(texts))]
         except Exception as e:
-            logger.error(f"Error adding texts to vectorstore: {str(e)}")
+            logger.error(f"Error adding documents to vectorstore: {str(e)}")
             return []
 
-    async def similarity_search(
-        self,
-        query_embedding: List[float],
-        k: int = 3,
-        threshold: float = 0.7
-    ) -> List[Dict]:
+    async def similarity_search(self, query_embedding: np.ndarray, k: int = 4, threshold: float = 0.0) -> List[Dict]:
+        logger.info(f"Searching for {k} most similar documents")
+        logger.info(f"Query embedding shape: {query_embedding.shape}")
+        logger.info(f"Query embedding norm: {np.linalg.norm(query_embedding)}")
         try:
-            logger.info(f"Searching for {k} most similar documents")
-            logger.info(f"Query embedding norm: {np.linalg.norm(query_embedding)}")
+            # Ensure query_embedding is a list for ChromaDB
+            query_emb = query_embedding.tolist() if isinstance(query_embedding, np.ndarray) else query_embedding
             results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=k
+                query_embeddings=[query_emb],
+                n_results=k,
+                include=["metadatas", "documents", "distances"]
             )
-            
             logger.info(f"Raw query results: {results}")
-            documents = results['documents'][0]
-            distances = results['distances'][0]
-            metadatas = results['metadatas'][0]
-            ids = results['ids'][0]
             
-            # Filter by similarity threshold and create result objects
-            similar_docs = []
-            for doc, distance, metadata, id in zip(documents, distances, metadatas, ids):
-                similarity_score = 1 - distance  # Convert distance to similarity
-                logger.info(f"Retrieved chunk {id}: {doc[:50]}... (score: {similarity_score:.2f})")
-                if similarity_score >= threshold:
-                    similar_docs.append({
-                        'text': doc,
-                        'score': similarity_score,
-                        'metadata': metadata,
-                        'id': id
-                    })
+            retrieved = []
+            for i, (doc, meta, dist) in enumerate(zip(results['documents'][0], results['metadatas'][0], results['distances'][0])):
+                score = 1 - dist  # Convert distance to similarity score
+                logger.info(f"Retrieved chunk {i}: {doc[:50]}... (score: {score:.2f})")
+                if score >= threshold:
+                    retrieved.append({"text": doc, "metadata": meta, "score": score})
             
-            logger.info(f"Found {len(similar_docs)} documents above threshold {threshold}")
-            return similar_docs
+            logger.info(f"Found {len(retrieved)} documents above threshold {threshold}")
+            return retrieved
         except Exception as e:
-            logger.error(f"Error during similarity search: {str(e)}")
+            logger.error(f"Error in similarity search: {str(e)}")
             return []

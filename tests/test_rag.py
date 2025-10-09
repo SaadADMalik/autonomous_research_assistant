@@ -4,9 +4,10 @@ import numpy as np
 from src.rag.embeddings import EmbeddingModel
 from src.rag.vectorstore import VectorStore
 from src.rag.pipeline import RAGPipeline
+from src.utils.logger import setup_logging
 
-# Force logging to ensure output is visible
-logging.basicConfig(level=logging.INFO, force=True)
+# Setup logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
 @pytest.fixture(scope="function")
@@ -17,104 +18,48 @@ def embedding_model():
 @pytest.fixture(scope="function")
 def vector_store():
     logger.info("Creating vector_store fixture")
-    store = VectorStore()
-    # Explicitly delete and recreate collection for clean state
+    vs = VectorStore(persist_dir="D:/autonomous_research_assistant/data/vectorstore")
+    # Clean start - collection is already recreated in __init__
+    yield vs
+    # Cleanup after test - delete and recreate for next test
     try:
-        store.client.delete_collection("research_assistant")
-        logger.info("Deleted existing research_assistant collection in fixture")
-    except:
-        logger.info("No existing research_assistant collection to delete in fixture")
-    store.collection = store.client.create_collection(
-        name="research_assistant",
-        metadata={"hnsw:space": "cosine", "description": "Research content embeddings"}
-    )
-    logger.info("Created new research_assistant collection in fixture")
-    return store
+        vs.delete_collection()
+        logger.info("Cleaned up vector_store fixture")
+    except Exception as e:
+        logger.warning(f"Cleanup warning: {e}")
 
-@pytest.fixture(scope="function")
-def rag_pipeline(embedding_model, vector_store):
-    logger.info("Creating rag_pipeline fixture")
-    return RAGPipeline(embedding_model, vector_store)
-
-def test_embedding_model(embedding_model):
+@pytest.mark.asyncio
+async def test_embedding_model(embedding_model):
     logger.info("Running test_embedding_model")
     text = "This is a test sentence."
     embeddings = embedding_model.embed_text(text)
-    assert embeddings.shape[0] == 384  # MiniLM-L6-v2 dimension
-    assert not np.any(np.isnan(embeddings))
+    assert embeddings.shape[0] == 768  # all-mpnet-base-v2 dimension
+    assert np.allclose(np.linalg.norm(embeddings), 1.0, atol=1e-5), "Embedding not normalized"
 
 @pytest.mark.asyncio
-async def test_vectorstore_operations(vector_store):
+async def test_vectorstore_operations(vector_store, embedding_model):
     logger.info("Running test_vectorstore_operations")
-    texts = ["This is a test document.", "This is another test document."]
-    embeddings = [[0.1] * 384, [0.2] * 384]  # Dummy embeddings
+    documents = ["This is a test document.", "This is another test document."]
+    metadata = [{"source": "test"}, {"source": "test"}]
+    ids = await vector_store.add_texts(documents, metadata)
+    assert len(ids) == len(documents), "Not all documents were added"
     
-    ids = await vector_store.add_texts(
-        texts=texts,
-        embeddings=embeddings,
-        metadatas=[{"source": "test"}, {"source": "test"}]
-    )
-    
-    assert len(ids) == 2
-    
-    results = await vector_store.similarity_search(
-        query_embedding=[0.1] * 384,
-        k=2,
-        threshold=0.0  # Lowered threshold for testing
-    )
-    
-    assert len(results) > 0
+    # Generate embedding for the query BEFORE searching
+    query_embedding = embedding_model.embed_text("test query")
+    results = await vector_store.similarity_search(query_embedding, k=2, threshold=0.0)
+    assert len(results) == 2, "Did not retrieve expected number of documents"
+    assert all(doc in documents for doc in [result['text'] for result in results]), "Retrieved documents do not match"
 
 @pytest.mark.asyncio
-async def test_rag_pipeline(rag_pipeline, vector_store):
+async def test_rag_pipeline():
     logger.info("Running test_rag_pipeline")
-    # Test processing and storing
-    texts = [
-        "Artificial intelligence is a field of computer science focused on creating intelligent systems.",
-        "Machine learning is a subset of artificial intelligence that enables systems to learn from data."
-    ]
-    metadata = [
-        {"source": "test", "type": "AI"},
-        {"source": "test", "type": "ML"}
-    ]
+    pipeline = RAGPipeline()
+    documents = ["This is a test document.", "This is another test document."]
+    metadata = [{"source": "test"}, {"source": "test"}]
     
-    logging.info("Testing process_and_store...")
-    ids = await rag_pipeline.process_and_store(texts, metadata)
-    assert len(ids) > 0
-    logging.info(f"Generated {len(ids)} document IDs")
+    ids = await pipeline.process_and_store(documents, metadata)
+    assert len(ids) == len(documents), "Not all documents were stored"
     
-    # Log stored documents for debugging
-    stored_data = vector_store.collection.get()
-    logging.info(f"Stored documents: {stored_data['documents']}")
-    logging.info(f"Stored IDs: {stored_data['ids']}")
-    
-    # Wait to ensure data is indexed
-    import asyncio
-    await asyncio.sleep(1)  # Reduced to 1s as in-memory client is fast
-    
-    # Test retrieval with identical query to maximize similarity
-    logging.info("Testing retrieve_relevant...")
-    query = "Artificial intelligence is a field of computer science focused on creating intelligent systems."
-    query_embedding = rag_pipeline.embedding_model.embed_text(query)
-    logging.info(f"Query embedding norm: {np.linalg.norm(query_embedding)}")
-    
-    results = await rag_pipeline.retrieve_relevant(
-        query=query,
-        k=2,
-        threshold=0.0  # Lowered to 0.0 for debugging
-    )
-    
-    # Log retrieved results
-    logging.info(f"Retrieved results: {results}")
-    for result in results:
-        logging.info(f"Result: {result['text']} (score: {result['score']})")
-    
-    assert len(results) > 0
-    assert all('score' in result for result in results)
-    assert all('text' in result for result in results)
-    logging.info(f"Retrieved {len(results)} relevant chunks")
-
-    # Clean up
-    ids = vector_store.collection.get()['ids']
-    if ids:
-        vector_store.collection.delete(ids=ids)
+    results = await pipeline.retrieve_relevant("test query", k=2, threshold=0.0)
+    assert len(results) == 2, "Did not retrieve expected number of documents"
+    assert all(doc in documents for doc in [result['text'] for result in results]), "Retrieved documents do not match"
