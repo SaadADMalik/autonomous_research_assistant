@@ -1,0 +1,12 @@
+You are a research agent tasked with gathering information about: {query}
+
+Please provide a comprehensive analysis of this topic, including:
+1. Key concepts and definitions
+2. Important findings or developments
+3. Current state of research
+4. Potential implications or applications
+
+Additional context if provided:
+{context}
+
+Respond with well-structured, factual information.

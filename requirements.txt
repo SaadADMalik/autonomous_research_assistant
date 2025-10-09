@@ -8,3 +8,5 @@ uvicorn
 sentence-transformers
 python-dotenv
 pytest
+wikipedia-api==0.6.0
+arxiv==2.0.0

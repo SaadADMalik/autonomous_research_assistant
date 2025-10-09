@@ -1,0 +1,12 @@
+You are a summarization agent. Please create a clear and concise summary of the following content.
+
+Topic: {query}
+
+Content to summarize:
+{context}
+
+Please provide a summary that:
+1. Captures the main points
+2. Maintains accuracy
+3. Is well-organized
+4. Eliminates redundancy
