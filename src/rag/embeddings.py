@@ -1,17 +1,17 @@
+import logging
 from sentence_transformers import SentenceTransformer
 from typing import List, Union
 import numpy as np
-import logging
+from ..utils.logger import setup_logging
 
-logging.basicConfig(level=logging.INFO)
+# Setup logging
+setup_logging()
 logger = logging.getLogger(__name__)
 
 class EmbeddingModel:
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = "all-mpnet-base-v2"):  # Using all-mpnet-base-v2
         logger.info(f"Initializing EmbeddingModel with {model_name}")
         self.model = SentenceTransformer(model_name)
-        # Force CPU usage
-        self.model.to('cpu')
 
     def embed_text(self, text: Union[str, List[str]]) -> np.ndarray:
         try:

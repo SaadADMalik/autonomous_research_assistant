@@ -1,17 +1,14 @@
-from abc import ABC, abstractmethod
-from .models import AgentInput, AgentOutput
+from dataclasses import dataclass
+from typing import Optional, List, Dict
 
-class BaseAgent(ABC):
-    def __init__(self):
-        self.name = self.__class__.__name__
+@dataclass
+class AgentInput:
+    query: str
+    context: Optional[str] = None
+    metadata: Optional[Dict] = None
 
-    @abstractmethod
-    async def run(self, input_data: AgentInput) -> AgentOutput:
-        """
-        Execute the agent's main functionality
-        Args:
-            input_data (AgentInput): The input data containing query and optional context
-        Returns:
-            AgentOutput: The agent's response with result and confidence
-        """
-        pass
+@dataclass
+class AgentOutput:
+    result: str
+    confidence: float
+    metadata: Optional[Dict] = None
