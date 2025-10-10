@@ -33,3 +33,7 @@ async def generate_summary(request: SummaryRequest):
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+@app.get("/status")
+async def status_check():
+    return {"progress": "Processing..."}
