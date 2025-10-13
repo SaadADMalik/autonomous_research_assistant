@@ -6,7 +6,6 @@ from chromadb.utils import embedding_functions
 import numpy as np
 from ..utils.logger import setup_logging
 
-# Setup logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,6 @@ class VectorStore:
         self.client = chromadb.PersistentClient(path=persist_dir, settings=Settings())
         self.collection_name = "research_assistant"
         
-        # Create embedding function that matches your EmbeddingModel
         self.embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
             model_name=embedding_model_name
         )
@@ -79,7 +77,6 @@ class VectorStore:
         logger.info(f"Query embedding shape: {query_embedding.shape}")
         logger.info(f"Query embedding norm: {np.linalg.norm(query_embedding)}")
         try:
-            # Ensure query_embedding is a list for ChromaDB
             query_emb = query_embedding.tolist() if isinstance(query_embedding, np.ndarray) else query_embedding
             results = self.collection.query(
                 query_embeddings=[query_emb],
@@ -90,7 +87,7 @@ class VectorStore:
             
             retrieved = []
             for i, (doc, meta, dist) in enumerate(zip(results['documents'][0], results['metadatas'][0], results['distances'][0])):
-                score = 1 - dist  # Convert distance to similarity score
+                score = 1 - dist
                 logger.info(f"Retrieved chunk {i}: {doc[:50]}... (score: {score:.2f})")
                 if score >= threshold:
                     retrieved.append({"text": doc, "metadata": meta, "score": score})

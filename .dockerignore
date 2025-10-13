@@ -1,6 +1,6 @@
 logs/
-     tests/
-     .pytest_cache/
-     __pycache__/
-     *.pyc
-     .venv/
+  tests/
+  .pytest_cache/
+  __pycache__/
+  *.pyc
+  .venv/

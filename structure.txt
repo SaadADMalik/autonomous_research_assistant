@@ -1,178 +1,79 @@
-﻿├── config
-│   └── prompts
-│       ├── researcher.txt
-│       ├── reviewer.txt
-│       └── summarizer.txt
-├── dashboard
-│   ├── templates
-│   └── app.py
-├── data
-│   ├── processed
-│   │   ├── arxiv_quantum computing_20251009_071823.json
-│   │   └── wikipedia_Python programming language_20251009_071822.json
-│   ├── raw
-│   │   ├── arxiv_quantum computing_20251009_071823.json
-│   │   └── wikipedia_Python programming language_20251009_071822.json
-│   ├── test_vectorstore
-│   │   ├── 5e6dc74c-0ced-44b0-8c22-a5e6e283ff07
-│   │   │   ├── data_level0.bin
-│   │   │   ├── header.bin
-│   │   │   ├── length.bin
-│   │   │   └── link_lists.bin
-│   │   ├── 66e683eb-8f28-4513-a435-1327f3348422
-│   │   │   ├── data_level0.bin
-│   │   │   ├── header.bin
-│   │   │   ├── length.bin
-│   │   │   └── link_lists.bin
-│   │   ├── 6851abb4-f720-4412-bc1e-d7adfbfba0cb
-│   │   │   ├── data_level0.bin
-│   │   │   ├── header.bin
-│   │   │   ├── length.bin
-│   │   │   └── link_lists.bin
-│   │   ├── b02765f9-2999-4dd5-8e97-27f7adc0fef9
-│   │   │   ├── data_level0.bin
-│   │   │   ├── header.bin
-│   │   │   ├── length.bin
-│   │   │   └── link_lists.bin
-│   │   ├── b14a6b69-4ee0-465b-8480-1c8c952e47bb
-│   │   │   ├── data_level0.bin
-│   │   │   ├── header.bin
-│   │   │   ├── length.bin
-│   │   │   └── link_lists.bin
-│   │   ├── b451070a-26fa-4eef-b3be-4546e0a36ff7
-│   │   │   ├── data_level0.bin
-│   │   │   ├── header.bin
-│   │   │   ├── length.bin
-│   │   │   └── link_lists.bin
-│   │   ├── e8318c6f-59c3-49fd-ac28-146c534431c3
-│   │   │   ├── data_level0.bin
-│   │   │   ├── header.bin
-│   │   │   ├── length.bin
-│   │   │   └── link_lists.bin
-│   │   ├── fc49b4e7-a868-433a-be29-02bcd0d1d578
-│   │   │   ├── data_level0.bin
-│   │   │   ├── header.bin
-│   │   │   ├── length.bin
-│   │   │   └── link_lists.bin
-│   │   └── chroma.sqlite3
-│   └── vectorstore
-│       ├── 0169d53c-5b1c-4003-8890-e5b68ca3daa5
-│       │   ├── data_level0.bin
-│       │   ├── header.bin
-│       │   ├── length.bin
-│       │   └── link_lists.bin
-│       ├── 05bb2b57-f49b-46b9-a01a-b9f46de15c74
-│       │   ├── data_level0.bin
-│       │   ├── header.bin
-│       │   ├── length.bin
-│       │   └── link_lists.bin
-│       ├── 0928ce15-433f-4270-902b-80adffba49bc
-│       │   ├── data_level0.bin
-│       │   ├── header.bin
-│       │   ├── length.bin
-│       │   └── link_lists.bin
-│       ├── 178e4c2c-ac20-4414-8486-9790bfcab85f
-│       │   ├── data_level0.bin
-│       │   ├── header.bin
-│       │   ├── length.bin
-│       │   └── link_lists.bin
-│       ├── 25b3c0e5-8b8d-47ae-b8d9-9a98f1697c8e
-│       │   ├── data_level0.bin
-│       │   ├── header.bin
-│       │   ├── length.bin
-│       │   └── link_lists.bin
-│       ├── 518b879c-887d-4a19-9bfe-df3bdc32ff86
-│       │   ├── data_level0.bin
-│       │   ├── header.bin
-│       │   ├── length.bin
-│       │   └── link_lists.bin
-│       ├── 6eff179f-7a04-46a0-ab59-ca0ecbf8e45c
-│       │   ├── data_level0.bin
-│       │   ├── header.bin
-│       │   ├── length.bin
-│       │   └── link_lists.bin
-│       ├── 8b03a9cd-5796-482e-a384-9820cd2fdd00
-│       │   ├── data_level0.bin
-│       │   ├── header.bin
-│       │   ├── length.bin
-│       │   └── link_lists.bin
-│       ├── 8d3a8e7a-4f4a-43a5-87e3-bb84bb15aef2
-│       │   ├── data_level0.bin
-│       │   ├── header.bin
-│       │   ├── length.bin
-│       │   └── link_lists.bin
-│       ├── b857d1bf-73b6-45d1-a6db-6e3bcc42ea1d
-│       │   ├── data_level0.bin
-│       │   ├── header.bin
-│       │   ├── length.bin
-│       │   └── link_lists.bin
-│       ├── c3131045-8e28-4a22-b2a2-dec0b8304a55
-│       │   ├── data_level0.bin
-│       │   ├── header.bin
-│       │   ├── length.bin
-│       │   └── link_lists.bin
-│       ├── ca940c29-de71-49bc-bed1-85a09b062c69
-│       │   ├── data_level0.bin
-│       │   ├── header.bin
-│       │   ├── length.bin
-│       │   └── link_lists.bin
-│       ├── cd971cad-b59d-455e-ae19-ad66c234d3bf
-│       │   ├── data_level0.bin
-│       │   ├── header.bin
-│       │   ├── length.bin
-│       │   └── link_lists.bin
-│       ├── ec872f0a-c52e-4284-938e-92cdecce8274
-│       │   ├── data_level0.bin
-│       │   ├── header.bin
-│       │   ├── length.bin
-│       │   └── link_lists.bin
-│       ├── f55ad58d-05c7-4cb9-a880-cef7931d38c3
-│       │   ├── data_level0.bin
-│       │   ├── header.bin
-│       │   ├── length.bin
-│       │   └── link_lists.bin
-│       └── chroma.sqlite3
-├── logs
-│   └── pipeline.log
-├── notebooks
-├── src
-│   ├── agents
-│   │   ├── base.py
-│   │   ├── models.py
-│   │   ├── researcher_agent.py
-│   │   ├── reviewer_agent.py
-│   │   ├── summarizer_agent.py
-│   │   └── __init__.py
-│   ├── api
-│   ├── pipelines
-│   │   └── orchestrator.py
-│   ├── rag
-│   │   ├── embeddings.py
-│   │   ├── pipeline.py
-│   │   ├── vectorstore.py
-│   │   └── __init__.py
-│   ├── utils
-│   │   ├── arxiv_utils.py
-│   │   ├── logger.py
-│   │   ├── preprocessing.py
-│   │   ├── storage.py
-│   │   ├── utils.py
-│   │   ├── wikipedia_utils.py
-│   │   └── __init__.py
-│   ├── data_fetcher.py
-│   └── main.py
-├── tests
-│   ├── test_agents.py
-│   ├── test_orchestrator.py
-│   ├── test_rag.py
-│   ├── test_utils.py
-│   └── __init__.py
-├── .dockerignore
-├── .env
-├── .env.example
-├── .gitignore
-├── docker-compose.yml
-├── Dockerfile
-├── README.md
-├── requirements.txt
-└── structure.txt
++-- .pytest_cache
++-- config
++-- dashboard
++-- data
++-- logs
++-- notebooks
++-- src
++-- tests
++-- .dockerignore
++-- .env
++-- .env.example
++-- docker-compose.yml
++-- Dockerfile
++-- README.md
++-- requirements.txt
++-- run_test.bat
++-- start_api.bat
++-- start_dashboard.bat
++-- structure.txt
++-- test_fetcher.py
+�   +-- v
+�   +-- README.md
+�   +-- prompts
+�   �   +-- researcher.txt
+�   �   +-- reviewer.txt
+�   �   +-- summarizer.txt
+�   +-- templates
+�   +-- app.py
+�   �   +-- index.html
+�   +-- processed
+�   +-- raw
+�   +-- vectorstore
+�   �   +-- arxiv_Quantum Computing_20251010_102615.json
+�   �   +-- arxiv_Quantum Computing_20251010_103047.json
+�   �   +-- arxiv_Quantum Computing_20251010_103735.json
+�   �   +-- wikipedia_Quantum Computing_20251010_102009.json
+�   �   +-- arxiv_Quantum Computing_20251010_102615.json
+�   �   +-- arxiv_Quantum Computing_20251010_103047.json
+�   �   +-- arxiv_Quantum Computing_20251010_103735.json
+�   �   +-- wikipedia_Quantum Computing_20251010_102009.json
+�   �   +-- 6fa963a5-41d6-4d09-b2f4-52494437cdc7
+�   �   +-- chroma.sqlite3
+�   �   �   +-- data_level0.bin
+�   �   �   +-- header.bin
+�   �   �   +-- length.bin
+�   �   �   +-- link_lists.bin
+�   +-- pipeline.log
+�   +-- agents
+�   +-- api
+�   +-- pipelines
+�   +-- rag
+�   +-- utils
+�   +-- data_fetcher.py
+�   +-- main.py
+�   �   +-- base.py
+�   �   +-- models.py
+�   �   +-- researcher_agent.py
+�   �   +-- reviewer_agent.py
+�   �   +-- summarizer_agent.py
+�   �   +-- __init__.py
+�   �   +-- orchestrator.py
+�   �   +-- embeddings.py
+�   �   +-- pipeline.py
+�   �   +-- vectorstore.py
+�   �   +-- __init__.py
+�   �   +-- arxiv_utils.py
+�   �   +-- database.py
+�   �   +-- logger.py
+�   �   +-- preprocessing.py
+�   �   +-- storage.py
+�   �   +-- utils.py
+�   �   +-- wikipedia_utils.py
+�   �   +-- __init__.py
+�   +-- test_agents.py
+�   +-- test_orchestrator.py
+�   +-- test_pipeline_fixed.py
+�   +-- test_rag.py
+�   +-- test_utils.py
+�   +-- __init__.py

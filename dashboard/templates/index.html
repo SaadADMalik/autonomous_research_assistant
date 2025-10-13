@@ -1,36 +1,447 @@
 <!DOCTYPE html>
-  <html>
-  <head>
-      <title>AI Research Assistant</title>
-      <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  </head>
-  <body>
-      <div class="container mt-5">
-          <h1>AI Research Assistant</h1>
-          <form method="POST" action="/">
-              <div class="mb-3">
-                  <input type="text" name="query" class="form-control" placeholder="Enter research topic" required>
-              </div>
-              <button type="submit" class="btn btn-primary">Generate Summary</button>
-          </form>
-          <div id="progress" class="mt-3">{{ progress }}</div>
-          <div id="output" class="mt-3">{{ output }}</div>
-      </div>
-      <script>
-          function pollProgress() {
-              fetch('/progress')
-                  .then(response => response.json())
-                  .then(data => {
-                      document.getElementById('progress').innerText = data.progress;
-                      if (data.progress !== "Completed") {
-                          setTimeout(pollProgress, 2000);
-                      }
-                  });
-          }
-          document.querySelector('form').addEventListener('submit', () => {
-              document.getElementById('progress').innerText = 'Processing...';
-              pollProgress();
-          });
-      </script>
-  </body>
-  </html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Research Assistant</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .main-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+        }
+        
+        .search-section {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            border-radius: 15px;
+            padding: 2rem;
+            color: white;
+        }
+        
+        .results-section {
+            padding: 2rem;
+        }
+        
+        .source-badge {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 12px;
+            font-weight: 600;
+            margin-right: 0.5rem;
+        }
+        
+        .source-semantic-scholar {
+            background: #28a745;
+            color: white;
+        }
+        
+        .source-educational {
+            background: #17a2b8;
+            color: white;
+        }
+        
+        .source-wikipedia {
+            background: #007bff;
+            color: white;
+        }
+        
+        .quality-score {
+            font-size: 1.2rem;
+            font-weight: bold;
+            padding: 0.5rem 1rem;
+            border-radius: 25px;
+            background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+            color: white;
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+        
+        .api-status {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            margin-right: 0.5rem;
+            margin-bottom: 0.25rem;
+        }
+        
+        .status-success { background: #d4edda; color: #155724; }
+        .status-warning { background: #fff3cd; color: #856404; }
+        .status-info { background: #d1ecf1; color: #0c5460; }
+        
+        .paper-card {
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+            margin-bottom: 1.5rem;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .paper-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+        }
+        
+        .confidence-display {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 0.75rem 1.5rem;
+            border-radius: 25px;
+            font-weight: bold;
+            display: inline-block;
+            margin-bottom: 1rem;
+        }
+        
+        .example-button {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            border-radius: 25px;
+            padding: 0.5rem 1rem;
+            margin: 0.25rem;
+            transition: all 0.3s ease;
+        }
+        
+        .example-button:hover {
+            background: rgba(255, 255, 255, 0.3);
+            color: white;
+            transform: scale(1.05);
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 2rem;
+        }
+        
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid py-5">
+        <div class="row justify-content-center">
+            <div class="col-lg-10">
+                <div class="main-container">
+                    <!-- Header Section -->
+                    <div class="search-section text-center">
+                        <h1 class="display-4 mb-3">
+                            <i class="fas fa-brain me-3"></i>AI Research Assistant
+                        </h1>
+                        <p class="lead mb-4">Get comprehensive research summaries from multiple academic sources</p>
+                        
+                        <!-- Search Form -->
+                        <div class="row justify-content-center">
+                            <div class="col-md-8">
+                                <div class="input-group input-group-lg">
+                                    <input type="text" id="searchQuery" class="form-control" 
+                                           placeholder="Enter your research topic..." 
+                                           style="border-radius: 25px 0 0 25px;">
+                                    <button class="btn btn-light" id="searchBtn" 
+                                            style="border-radius: 0 25px 25px 0; font-weight: bold;">
+                                        <i class="fas fa-search me-2"></i>Generate Summary
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Example Queries -->
+                        <div class="mt-4">
+                            <p class="mb-3">Try these examples:</p>
+                            <button class="btn example-button" onclick="setQuery('Quantum Computing')">Quantum Computing</button>
+                            <button class="btn example-button" onclick="setQuery('Artificial Intelligence')">Artificial Intelligence</button>
+                            <button class="btn example-button" onclick="setQuery('Climate Change')">Climate Change</button>
+                            <button class="btn example-button" onclick="setQuery('CRISPR Technology')">CRISPR Technology</button>
+                            <button class="btn example-button" onclick="setQuery('Machine Learning')">Machine Learning</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Loading Section -->
+                    <div class="loading" id="loadingSection">
+                        <div class="spinner"></div>
+                        <h5>🔍 Searching academic databases...</h5>
+                        <p class="text-muted">Fetching the latest research papers and generating your summary</p>
+                    </div>
+                    
+                    <!-- Results Section -->
+                    <div class="results-section" id="resultsSection" style="display: none;">
+                        <!-- Summary Display -->
+                        <div class="row mb-4">
+                            <div class="col-12">
+                                <div class="d-flex justify-content-between align-items-center mb-3">
+                                    <h2><i class="fas fa-file-alt me-2"></i>Research Summary</h2>
+                                    <div class="confidence-display" id="confidenceDisplay">
+                                        Confidence: 0%
+                                    </div>
+                                </div>
+                                
+                                <!-- Quality and API Status -->
+                                <div class="row mb-3">
+                                    <div class="col-md-6">
+                                        <div class="quality-score" id="qualityScore">
+                                            Quality Score: 0/10
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="api-status">
+                                            <h6><i class="fas fa-server me-2"></i>Data Sources Status</h6>
+                                            <div id="apiStatus"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Summary Content -->
+                                <div class="card paper-card">
+                                    <div class="card-body">
+                                        <div id="summaryContent" class="fs-5 lh-base"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Sources Information -->
+                        <div class="row">
+                            <div class="col-12">
+                                <h4><i class="fas fa-books me-2"></i>Sources</h4>
+                                <div class="mb-3">
+                                    <div id="sourcesBreakdown"></div>
+                                </div>
+                                <div id="sourcesList"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Error Section -->
+                    <div class="alert alert-danger" id="errorSection" style="display: none;">
+                        <h5><i class="fas fa-exclamation-triangle me-2"></i>Error</h5>
+                        <div id="errorMessage"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let isSearching = false;
+        
+        function setQuery(query) {
+            document.getElementById('searchQuery').value = query;
+        }
+        
+        function showLoading() {
+            document.getElementById('loadingSection').style.display = 'block';
+            document.getElementById('resultsSection').style.display = 'none';
+            document.getElementById('errorSection').style.display = 'none';
+        }
+        
+        function hideLoading() {
+            document.getElementById('loadingSection').style.display = 'none';
+        }
+        
+        function showError(message) {
+            hideLoading();
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('errorSection').style.display = 'block';
+            document.getElementById('resultsSection').style.display = 'none';
+        }
+        
+        function displayResults(data) {
+            hideLoading();
+            
+            const metadata = data.metadata;
+            const queryInfo = metadata.query_info;
+            const sourcesInfo = metadata.sources_info;
+            const dataQuality = metadata.data_quality;
+            const apiStatus = metadata.api_status;
+            
+            // Display confidence
+            document.getElementById('confidenceDisplay').textContent = `Confidence: ${Math.round(data.confidence * 100)}%`;
+            
+            // Display quality score
+            document.getElementById('qualityScore').textContent = `Quality Score: ${dataQuality.quality_score}/10`;
+            
+            // Display spell correction if applied
+            let summaryContent = data.result;
+            if (queryInfo.spell_corrected) {
+                summaryContent = `<div class="alert alert-info mb-3">
+                    <i class="fas fa-spell-check me-2"></i>
+                    <strong>Spell correction applied:</strong> "${queryInfo.original_query}" → "${queryInfo.corrected_query}"
+                </div>` + summaryContent;
+            }
+            document.getElementById('summaryContent').innerHTML = summaryContent;
+            
+            // Display API status
+            let apiStatusHtml = '';
+            for (const [service, status] of Object.entries(apiStatus)) {
+                let statusClass = 'status-info';
+                let statusIcon = 'fas fa-info-circle';
+                
+                if (status === 'success') {
+                    statusClass = 'status-success';
+                    statusIcon = 'fas fa-check-circle';
+                } else if (status === 'rate_limited') {
+                    statusClass = 'status-warning';
+                    statusIcon = 'fas fa-clock';
+                } else if (status === 'active') {
+                    statusClass = 'status-info';
+                    statusIcon = 'fas fa-graduation-cap';
+                }
+                
+                const serviceName = service.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+                apiStatusHtml += `<span class="status-indicator ${statusClass}">
+                    <i class="${statusIcon} me-1"></i>${serviceName}: ${status}
+                </span>`;
+            }
+            document.getElementById('apiStatus').innerHTML = apiStatusHtml;
+            
+            // Display sources breakdown
+            let breakdownHtml = '<div class="mb-3">';
+            for (const [source, count] of Object.entries(sourcesInfo.sources_breakdown)) {
+                let badgeClass = 'source-badge ';
+                let sourceIcon = '';
+                let sourceName = '';
+                
+                if (source === 'semantic_scholar') {
+                    badgeClass += 'source-semantic-scholar';
+                    sourceIcon = '📚';
+                    sourceName = `${count} Real Research Papers`;
+                } else if (source === 'educational_content') {
+                    badgeClass += 'source-educational';
+                    sourceIcon = '🎓';
+                    sourceName = `${count} Educational Content`;
+                } else if (source === 'wikipedia') {
+                    badgeClass += 'source-wikipedia';
+                    sourceIcon = '📖';
+                    sourceName = `${count} Wikipedia Articles`;
+                }
+                
+                breakdownHtml += `<span class="${badgeClass}">${sourceIcon} ${sourceName}</span>`;
+            }
+            breakdownHtml += '</div>';
+            document.getElementById('sourcesBreakdown').innerHTML = breakdownHtml;
+            
+            // Display individual sources
+            let sourcesHtml = '';
+            if (sourcesInfo.source_urls && sourcesInfo.source_urls.length > 0) {
+                sourcesInfo.source_urls.forEach((url, index) => {
+                    if (url) {
+                        sourcesHtml += `
+                            <div class="card paper-card">
+                                <div class="card-body">
+                                    <h6 class="card-title">
+                                        <a href="${url}" target="_blank" class="text-decoration-none">
+                                            <i class="fas fa-external-link-alt me-2"></i>Source ${index + 1}
+                                        </a>
+                                    </h6>
+                                    <p class="card-text text-muted">${url}</p>
+                                </div>
+                            </div>`;
+                    }
+                });
+            }
+            
+            if (!sourcesHtml) {
+                sourcesHtml = '<p class="text-muted">No external sources available for this query.</p>';
+            }
+            
+            document.getElementById('sourcesList').innerHTML = sourcesHtml;
+            
+            // Show results with animation
+            document.getElementById('resultsSection').style.display = 'block';
+            document.getElementById('resultsSection').classList.add('fade-in');
+            document.getElementById('errorSection').style.display = 'none';
+        }
+        
+        async function performSearch() {
+            if (isSearching) return;
+            
+            const query = document.getElementById('searchQuery').value.trim();
+            if (!query) {
+                showError('Please enter a research topic');
+                return;
+            }
+            
+            isSearching = true;
+            document.getElementById('searchBtn').disabled = true;
+            showLoading();
+            
+            try {
+                const response = await fetch('http://localhost:8000/generate_summary', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: query,
+                        max_results: 5
+                    })
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || `HTTP ${response.status}`);
+                }
+                
+                const data = await response.json();
+                displayResults(data);
+                
+            } catch (error) {
+                console.error('Search error:', error);
+                showError(`Failed to generate summary: ${error.message}`);
+            } finally {
+                isSearching = false;
+                document.getElementById('searchBtn').disabled = false;
+            }
+        }
+        
+        // Event listeners
+        document.getElementById('searchBtn').addEventListener('click', performSearch);
+        document.getElementById('searchQuery').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                performSearch();
+            }
+        });
+        
+        // Auto-focus search input
+        document.getElementById('searchQuery').focus();
+    </script>
+</body>
+</html>

@@ -1,14 +1,12 @@
-from dataclasses import dataclass
-from typing import Optional, List, Dict
+from pydantic import BaseModel, Field
+from typing import Dict, Any, Optional
 
-@dataclass
-class AgentInput:
+class AgentInput(BaseModel):
     query: str
-    context: Optional[str] = None
-    metadata: Optional[Dict] = None
+    context: str = ""  # Optional context with empty string as default
+    metadata: Optional[Dict[str, Any]] = None  # Add this field
 
-@dataclass
-class AgentOutput:
+class AgentOutput(BaseModel):
     result: str
-    confidence: float
-    metadata: Optional[Dict] = None
+    confidence: float = Field(ge=0.0, le=1.0)  # Ensure confidence is between 0 and 1
+    metadata: Dict[str, Any] = Field(default_factory=dict)  # Add metadata field

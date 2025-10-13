@@ -11,11 +11,10 @@ class WikipediaAPI:
             language='en'
         )
         self.last_request_time = 0
-        self.min_request_interval = 1  # seconds between requests
+        self.min_request_interval = 1
         self.storage = DataStorage()
 
     def _rate_limit(self) -> None:
-        """Basic rate limiting implementation."""
         current_time = time.time()
         time_since_last = current_time - self.last_request_time
         if time_since_last < self.min_request_interval:
@@ -23,10 +22,6 @@ class WikipediaAPI:
         self.last_request_time = current_time
 
     async def search(self, query: str) -> Optional[Dict]:
-        """
-        Search Wikipedia and return page content with metadata.
-        Implements async for consistency with other APIs.
-        """
         self._rate_limit()
         
         try:
@@ -40,12 +35,11 @@ class WikipediaAPI:
             data = {
                 **metadata,
                 "title": page.title,
-                "content": content,
+                "summary": content,  # Normalize to "summary"
                 "url": page.fullurl,
                 "sections": [sect.title for sect in page.sections],
             }
             
-            # Save both raw and processed data
             await self.storage.save_raw_data(data)
             await self.storage.save_processed_data(data)
             

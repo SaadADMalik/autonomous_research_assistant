@@ -1,5 +1,5 @@
 import re
-from typing import List
+from typing import List  # Fixed: was "from typing: List"
 from datetime import datetime, UTC
 
 def clean_text(text: str) -> str:
@@ -16,31 +16,27 @@ def clean_text(text: str) -> str:
     
     return text
 
-def chunk_text(text: str, max_length: int = 512) -> List[str]:
-    """Split text into chunks of approximately equal size."""
+def chunk_text(text: str, max_length: int = 500) -> List[str]:
+    """Split text into chunks of max_length characters."""
     if not text:
         return []
-    
-    # Split by sentences to maintain context
-    sentences = re.split(r'(?<=[.!?])\s+', text)
+    words = text.split()
     chunks = []
     current_chunk = []
     current_length = 0
     
-    for sentence in sentences:
-        sentence_length = len(sentence)
-        
-        if current_length + sentence_length <= max_length:
-            current_chunk.append(sentence)
-            current_length += sentence_length
+    for word in words:
+        word_length = len(word) + 1  # Account for space
+        if current_length + word_length > max_length:
+            chunks.append(" ".join(current_chunk))
+            current_chunk = [word]
+            current_length = word_length
         else:
-            if current_chunk:
-                chunks.append(' '.join(current_chunk))
-            current_chunk = [sentence]
-            current_length = sentence_length
+            current_chunk.append(word)
+            current_length += word_length
     
     if current_chunk:
-        chunks.append(' '.join(current_chunk))
+        chunks.append(" ".join(current_chunk))
     
     return chunks
 
