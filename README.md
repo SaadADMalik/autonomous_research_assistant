@@ -1,18 +1,32 @@
 # 🚀 Autonomous AI Research Assistant
 
+<!-- CI/CD & Build Status -->
+[![CI Status](https://github.com/SaadADMalik/autonomous_research_assistant/workflows/CI%20-%20Continuous%20Integration/badge.svg)](https://github.com/SaadADMalik/autonomous_research_assistant/actions)
+[![CodeQL](https://github.com/SaadADMalik/autonomous_research_assistant/workflows/CodeQL%20Security%20Analysis/badge.svg)](https://github.com/SaadADMalik/autonomous_research_assistant/security/code-scanning)
+
+<!-- Technology Stack -->
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.104%2B-009688.svg)](https://fastapi.tiangolo.com/)
+[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://hub.docker.com/)
+
+<!-- AI/ML Models -->
+[![Sentence-BERT](https://img.shields.io/badge/Model-SBERT-orange.svg)](https://www.sbert.net/)
+[![LangChain](https://img.shields.io/badge/LangChain-0.2%2B-green.svg)](https://langchain.com/)
+
+<!-- Quality Metrics -->
+[![Tests](https://img.shields.io/badge/tests-21%2F23%20passing-brightgreen.svg)](https://github.com/SaadADMalik/autonomous_research_assistant/actions)
+[![Coverage](https://img.shields.io/badge/coverage-71%25-green.svg)](https://github.com/SaadADMalik/autonomous_research_assistant/actions)
+
+<!-- Community -->
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/SaadADMalik/autonomous_research_assistant/pulls)
+[![Open Source](https://img.shields.io/badge/Open%20Source-100%25-success.svg)](https://github.com/SaadADMalik/autonomous_research_assistant)
+
+
 <img width="1588" height="741" alt="image" src="https://github.com/user-attachments/assets/0d134c28-a07d-49bf-b154-a8041be4fd72" />
 
 
 <div align="center">
-
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.104%2B-009688.svg)](https://fastapi.tiangolo.com/)
-[![Sentence-BERT](https://img.shields.io/badge/Model-SBERT-orange.svg)](https://www.sbert.net/)
-[![Tests Passing](https://img.shields.io/badge/tests-23%20passing-brightgreen.svg)]()
-[![Coverage](https://img.shields.io/badge/coverage-95%25%2B-success.svg)]()
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)]()
-[![Open Source](https://img.shields.io/badge/Open%20Source-100%25-green.svg)]()
 
 ### **Find and understand 200M+ academic papers in under 30 seconds** ⚡
 
