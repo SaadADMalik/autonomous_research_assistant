@@ -1,6 +1,53 @@
-logs/
-  tests/
-  .pytest_cache/
-  __pycache__/
-  *.pyc
-  .venv/
+# Git
+.git
+.gitignore
+.github
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+venv
+env
+.venv
+
+# Tests
+tests/
+htmlcov/
+.coverage
+coverage.xml
+*.cover
+.pytest_cache
+
+# Documentation
+*.md
+docs/
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local files
+*.log
+*.bat
+.env
+.env.local
+chroma_data/
+data/
+
+# Backups
+*.backup
+*.bak
