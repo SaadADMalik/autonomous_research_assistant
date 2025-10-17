@@ -1,10 +1,9 @@
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware  # Add this import
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import logging
 from datetime import datetime
 from src.data_fetcher import DataFetcher
-from src.pipelines.orchestrator import Orchestrator
 from src.utils.logger import setup_logging
 from src.utils.spell_check import SpellChecker
 
@@ -14,20 +13,44 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Autonomous AI Research Assistant", version="1.0.0")
 
-# Add CORS middleware - THIS IS THE FIX
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# ✅ ONLY CHANGE: Initialize once at startup instead of per-request
 spell_checker = SpellChecker()
+data_fetcher = DataFetcher()
+
+# Lazy-load orchestrator
+_orchestrator_instance = None
+
+def get_orchestrator():
+    """Get or create orchestrator singleton"""
+    global _orchestrator_instance
+    if _orchestrator_instance is None:
+        from src.pipelines.orchestrator import Orchestrator
+        logger.info("🔧 Initializing Orchestrator (first request)")
+        _orchestrator_instance = Orchestrator()
+    return _orchestrator_instance
 
 class QueryRequest(BaseModel):
     query: str
     max_results: int = 5
+
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "message": "Autonomous Research Assistant API",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/health"
+    }
 
 @app.get("/health")
 async def health():
@@ -61,8 +84,7 @@ async def generate_summary(request: QueryRequest):
             logger.info(f"📝 SPELL CORRECTION: '{original_query}' → '{corrected_query}'")
         
         # Fetch documents from all sources using corrected query
-        fetcher = DataFetcher()  # Add API key here when you get it: DataFetcher(api_key="YOUR_KEY")
-        documents = await fetcher.fetch_all(corrected_query, max_results=request.max_results)
+        documents = await data_fetcher.fetch_all(corrected_query, max_results=request.max_results)
         
         logger.info(f"📊 DOCUMENTS FETCHED: {len(documents)} total documents")
         
@@ -90,8 +112,8 @@ async def generate_summary(request: QueryRequest):
         logger.info(f"📈 SOURCES: {sources_breakdown}")
         logger.info(f"🔧 API STATUS: {api_status}")
         
-        # Run pipeline
-        orchestrator = Orchestrator()
+        # ✅ ONLY CHANGE: Use singleton instead of creating new instance
+        orchestrator = get_orchestrator()
         result = await orchestrator.run_pipeline(original_query, documents)
         
         # Check for pipeline failures
