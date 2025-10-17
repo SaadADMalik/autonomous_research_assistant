@@ -5,13 +5,14 @@ Provides a user-friendly interface for generating research summaries.
 from flask import Flask, render_template, request, jsonify
 import requests
 import logging
+import os
+
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# FastAPI backend configuration
-API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = os.getenv('BACKEND_API_URL', 'http://localhost:8000')
 
 
 @app.route('/')
