@@ -3,6 +3,11 @@ import os
 
 def setup_logging():
     logger = logging.getLogger()
+    
+    # ✅ Prevent duplicate handlers
+    if logger.handlers:
+        return  # Already configured
+    
     logger.setLevel(logging.INFO)
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     
