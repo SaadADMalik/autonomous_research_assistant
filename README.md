@@ -28,6 +28,12 @@
 
 <div align="center">
 
+
+## 🎥 Demo
+
+[▶️ Watch the demo video](https://github.com/SaadADMalik/autonomous_research_assistant/releases/tag/Demo)
+
+
 ### **Find and understand 200M+ academic papers in under 30 seconds** ⚡
 
 *Powered by Sentence-BERT & Custom Transformers | Zero API Costs | Privacy-First Architecture*
