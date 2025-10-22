@@ -52,7 +52,7 @@ def generate_summary():
         response = requests.post(
             f"{API_BASE_URL}/generate_summary",
             json={"query": query, "max_results": max_results},
-            timeout=60  # 60 second timeout for processing
+            timeout=180  
         )
         
         if response.status_code == 200:
