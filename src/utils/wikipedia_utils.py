@@ -29,7 +29,10 @@ class WikipediaAPI:
             if not page.exists():
                 return None
 
-            content = clean_text(page.text)
+            # Use page.summary (introduction only) not page.text (full article)
+            # Full text contains templates/infoboxes with non-English content
+            raw_content = page.summary if page.summary else page.text[:3000]
+            content = clean_text(raw_content)
             metadata = create_metadata("wikipedia", query)
             
             data = {

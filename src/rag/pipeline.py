@@ -15,7 +15,8 @@ class RAGPipeline:
     def __init__(self, embedding_model: EmbeddingModel = None, vector_store: VectorStore = None):
         logger.info("Initializing RAGPipeline")
         self.embedding_model = embedding_model or EmbeddingModel()
-        self.vector_store = vector_store or VectorStore(persist_dir="D:/autonomous_research_assistant/data/vectorstore")
+        # 🔥 FIX: Default to in-memory vectorstore (will be replaced per-query in researcher_agent)
+        self.vector_store = vector_store or VectorStore(use_memory=True, collection_name="rag_temp", reset_collection=True)
 
     def chunk_text(self, text: str, chunk_size: int = 1000, overlap: int = 200) -> List[str]:
         """

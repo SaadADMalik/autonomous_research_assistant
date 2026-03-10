@@ -123,6 +123,20 @@ class ResearcherAgent:
             # Store documents in RAG pipeline if available
             if self.rag_pipeline:
                 try:
+                    # 🔥 CRITICAL FIX: Use FRESH in-memory vectorstore per query
+                    # Disk persistence causes cross-query pollution that's hard to clear
+                    logger.info("🧹 Creating fresh in-memory vectorstore for this query...")
+                    from src.rag.vectorstore import VectorStore
+                    
+                    # Create temporary in-memory vectorstore (no disk persistence)
+                    self.rag_pipeline.vector_store = VectorStore(
+                        use_memory=True,  # In-memory only, prevents disk pollution
+                        collection_name="temp_query",
+                        embedding_model_name="all-mpnet-base-v2",
+                        reset_collection=True
+                    )
+                    logger.info("✅ Fresh vectorstore created")
+                    
                     logger.debug(f" Storing {len(doc_texts)} documents in RAG pipeline")
                     ids = await self.rag_pipeline.process_and_store(
                         doc_texts, 

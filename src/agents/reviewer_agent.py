@@ -92,28 +92,34 @@ class ReviewerAgent:
             
             if confidence < self.confidence_threshold:
                 logger.warning(f"⚠️ Confidence {confidence:.2f} below threshold {self.confidence_threshold}")
-                logger.info(f"📝 Attempting to re-summarize with adjusted query...")
                 
-                try:
-                    # Retry with more specific prompt
-                    adjusted_input = AgentInput(
-                        query=input_data.query + " (Focus on key findings and methodology)",
-                        context=input_data.context,
-                        metadata={**input_data.metadata, "retry": True}
-                    )
-                    
-                    retry_output = await self.summarizer.run(adjusted_input)
-                    
-                    if retry_output.confidence > 0.0 and retry_output.result:
-                        logger.info(f"✅ Retry successful: {retry_output.result[:50]}...")
-                        result = retry_output.result
-                        confidence = retry_output.confidence * 0.9  # Slightly penalize retry
-                    else:
-                        logger.warning(f"⚠️ Retry failed, using original summary")
+                # In fast mode, skip retry to avoid double LLM call
+                is_fast = input_data.metadata.get('mode') == 'fast' if input_data.metadata else False
+                
+                if is_fast:
+                    logger.info("⚡ Fast mode: skipping LLM retry for speed")
+                else:
+                    logger.info(f"📝 Attempting to re-summarize with adjusted query...")
+                    try:
+                        # Retry with more specific prompt
+                        adjusted_input = AgentInput(
+                            query=input_data.query + " (Focus on key findings and methodology)",
+                            context=input_data.context,
+                            metadata={**input_data.metadata, "retry": True}
+                        )
                         
-                except Exception as e:
-                    logger.error(f"❌ Error during retry: {str(e)}")
-                    # Continue with original summary
+                        retry_output = await self.summarizer.run(adjusted_input)
+                        
+                        if retry_output.confidence > 0.0 and retry_output.result:
+                            logger.info(f"✅ Retry successful: {retry_output.result[:50]}...")
+                            result = retry_output.result
+                            confidence = retry_output.confidence * 0.9  # Slightly penalize retry
+                        else:
+                            logger.warning(f"⚠️ Retry failed, using original summary")
+                            
+                    except Exception as e:
+                        logger.error(f"❌ Error during retry: {str(e)}")
+                        # Continue with original summary
             
             # Final confidence cap
             final_confidence = min(0.95, max(0.3, confidence))

@@ -1,20 +1,424 @@
 import os
 import logging
-from typing import List, Dict
+import asyncio
+from typing import List, Dict, Optional
 from datetime import datetime
 from src.utils.semantic_scholar_api import SemanticScholarAPI
 from src.utils.wikipedia_utils import WikipediaAPI
+from src.utils.arxiv_api import ArxivAPI
+from src.utils.openalex_api import OpenAlexAPI
+from src.agents.api_router_agent import APIRouterAgent
+from src.utils.relevance_filter import RelevanceFilter
 
 logger = logging.getLogger(__name__)
 
 class DataFetcher:
-    """Production data fetcher using Semantic Scholar + Wikipedia with full source tracking."""
+    """
+    🎯 Phase 3: Multi-API data fetcher with intelligent routing.
+    
+    Supports: arXiv, OpenAlex, Semantic Scholar, Wikipedia
+    Uses APIRouterAgent to select best API for each query.
+    """
     
     def __init__(self):
-        # Add your actual API key here
+        # Initialize all API clients
         api_key = os.getenv('SEMANTIC_SCHOLAR_API_KEY')  
         self.semantic_scholar = SemanticScholarAPI(api_key)
         self.wikipedia_api = WikipediaAPI()
+        
+        # 🎯 Phase 3: New APIs
+        self.arxiv = ArxivAPI()
+        self.openalex = OpenAlexAPI()
+        
+        # 🎯 Phase 3: Smart routing
+        self.router = APIRouterAgent()
+        
+        # Relevance filter to remove off-topic papers
+        self.relevance_filter = RelevanceFilter()
+        
+        logger.info("✅ DataFetcher initialized with 4 APIs (arXiv, OpenAlex, Semantic Scholar, Wikipedia)")
+    
+    async def fetch_with_smart_routing(
+        self, 
+        query: str, 
+        max_results: int = 15,  # 🎯 Phase 4: Increased to 15 (production optimal)
+        parallel_fetch: bool = True,  # 🎯 Phase 4: Enable parallel fetching
+        try_fallbacks: bool = True,  # Backward compatibility (deprecated, now always uses fallbacks)
+        mode: str = "thorough"  # 🎯 Phase 1: "fast" or "thorough"
+    ) -> Dict[str, any]:
+        """
+        🎯 Phase 4: Parallel multi-API fetch with intelligent routing.
+        
+        Launches multiple API calls simultaneously for speed:
+        - arXiv + OpenAlex in parallel → take best results
+        - First to finish wins (OpenAlex ~1s, arXiv ~30s)
+        - Combine results for comprehensive coverage
+        
+        🎯 Phase 1 FAST MODE:
+        - Skips slow APIs (arXiv=30s, OpenAlex=10s)
+        - Only uses fast APIs (Semantic Scholar=5s, Wikipedia=3s)
+        - Target: 5-10s latency
+        
+        Args:
+            query: Search query
+            max_results: Total papers to fetch (default 15 for production)
+            parallel_fetch: If True, fetch from multiple APIs simultaneously
+            mode: "fast" (chatbot) or "thorough" (research)
+            
+        Returns:
+            Dictionary with:
+            - papers: List of paper dictionaries (up to max_results)
+            - routing_info: Router decision details
+            - apis_used: List of APIs that were actually called
+            - fetch_times: Time taken by each API
+        """
+        logger.info(f"🚀 Smart Routing ({mode.upper()}): Starting fetch for '{query}'")
+        
+        # Get routing decision
+        routing = self.router.route(query)
+        primary_api = routing["primary"]
+        fallback_apis = routing["fallbacks"]
+        
+        # 🎯 Phase 1: FAST MODE - Skip only arxiv (slow, 30s+)
+        if mode == "fast":
+            # APIs by reliability for fast mode:
+            # 1. openalex (~3-5s, no rate limits, 250M papers, FREE) ✅
+            # 2. semantic_scholar (~5s, rate limited sometimes)
+            # 3. wikipedia (~3s, no rate limits)
+            # 4. arxiv - SKIP (30s+)
+            SLOW_APIS = {"arxiv"}  # Only skip arxiv (30s+). OpenAlex works fine in fast mode.
+
+            # Filter primary API - avoid arxiv
+            if primary_api in SLOW_APIS:
+                logger.info(f"FAST MODE: Skipping slow primary API '{primary_api}', using openalex")
+                primary_api = "openalex"
+
+            # Filter fallback APIs - exclude arxiv only
+            fallback_apis = [api for api in fallback_apis if api not in SLOW_APIS]
+
+            # Ensure openalex + wikipedia are in the pipeline
+            if "openalex" not in fallback_apis and primary_api != "openalex":
+                fallback_apis.insert(0, "openalex")
+            if "wikipedia" not in fallback_apis and primary_api != "wikipedia":
+                fallback_apis.append("wikipedia")
+
+            # Reduce max_results for speed
+            if max_results > 5:
+                logger.info(f"FAST MODE: Reducing max_results from {max_results} to 5 for speed")
+                max_results = 5
+        
+        logger.info(f"🧭 Router Decision: Primary={primary_api}, Domain={routing['domain']}, Confidence={routing['confidence']:.2f}")
+        
+        if parallel_fetch:
+            # 🎯 Phase 4: Parallel fetching strategy
+            # Launch primary + first fallback simultaneously
+            papers, apis_used, fetch_times = await self._parallel_fetch(
+                primary_api=primary_api,
+                fallback_api=fallback_apis[0] if fallback_apis else None,
+                query=query,
+                max_results=max_results,
+                mode=mode  # 🎯 Phase 1: Pass mode for timeout control
+            )
+            
+            # If still insufficient, try remaining fallbacks
+            # In fast mode, skip this: all fast APIs already ran in parallel race above
+            if mode != "fast" and len(papers) < 5 and len(fallback_apis) > 1:
+                logger.info(f"🔄 Got {len(papers)} papers, trying more fallbacks...")
+                for fallback_api in fallback_apis[1:]:
+                    if fallback_api not in apis_used:
+                        try:
+                            extra_papers = await self._fetch_from_api(fallback_api, query, max_results // 3)
+                            if extra_papers:
+                                papers.extend(extra_papers)
+                                apis_used.append(fallback_api)
+                                logger.info(f"✅ Added {len(extra_papers)} from {fallback_api}")
+                                if len(papers) >= max_results:
+                                    break
+                        except Exception as e:
+                            logger.error(f"❌ Fallback {fallback_api} error: {e}")
+        else:
+            # Sequential fallback (old behavior)
+            papers, apis_used, fetch_times = await self._sequential_fetch(
+                primary_api, fallback_apis, query, max_results
+            )
+        
+        # 🎯 NEW: Filter out irrelevant papers (e.g., "careers in crime" for "careers for women")
+        if papers and "educational_fallback" not in apis_used:
+            papers = self.relevance_filter.filter_papers(query, papers)
+        
+        # Last resort: educational fallback
+        if not papers:
+            logger.warning("⚠️ All APIs failed - using educational fallback")
+            papers = self._create_educational_fallback(query, max_results)
+            apis_used.append("educational_fallback")
+            fetch_times = {"educational_fallback": 0.0}
+        
+        # Limit to max_results and deduplicate
+        papers = self._deduplicate_papers(papers)[:max_results]
+        
+        result = {
+            "papers": papers,
+            "routing_info": routing,
+            "apis_used": apis_used,
+            "total_papers": len(papers),
+            "fetch_times": fetch_times
+        }
+        
+        logger.info(f"✅ Smart Routing Complete: {len(papers)} papers from {apis_used}")
+        logger.info(f"⏱️  Fetch times: {fetch_times}")
+        
+        return result
+    
+    async def _parallel_fetch(
+        self,
+        primary_api: str,
+        fallback_api: Optional[str],
+        query: str,
+        max_results: int,
+        mode: str = "thorough"  # 🎯 Phase 1: Add mode parameter
+    ) -> tuple[List[Dict], List[str], Dict[str, float]]:
+        """
+        🎯 TIMEOUT WINDOW APPROACH: Launch all APIs, use whoever responds within timeout.
+        
+        Strategy:
+        - Launch ALL allowed APIs simultaneously (race condition)
+        - Wait up to 5s (fast mode) or 10s (thorough mode)
+        - Use ALL results that arrive within window
+        - Merge and prioritize: research papers > wikipedia
+        
+        Benefits:
+        - Speed: 5-7s total (vs 10-15s sequential)
+        - Quality: Multiple sources = better coverage
+        - Reliability: If one API fails, others compensate
+        - FREE: Single Groq call at the end
+        
+        Args:
+            primary_api: Suggested primary API (for logging)
+            fallback_api: Suggested fallback (for logging)
+            query: Search query
+            max_results: Max papers to collect
+            mode: "fast" (5s timeout) or "thorough" (10s timeout)
+            
+        Returns:
+            (papers, apis_used, fetch_times)
+        """
+        import time
+        
+        # 🏁 RACE CONDITION: Launch all allowed APIs
+        apis_to_fetch = []
+        
+        if mode == "fast":
+            # Fast mode: openalex + semantic_scholar + wikipedia (skip arxiv=30s)
+            apis_to_fetch = ["openalex", "semantic_scholar", "wikipedia"]
+            timeout_window = 8.0  # 8s window - enough for OpenAlex (~3-5s)
+            logger.info(f"RACE MODE (FAST): Launching {apis_to_fetch} | Timeout: {timeout_window}s")
+        else:
+            # Thorough mode: All APIs
+            apis_to_fetch = ["openalex", "semantic_scholar", "wikipedia", "arxiv"]
+            timeout_window = 15.0  # 15 second window
+            logger.info(f"RACE MODE (THOROUGH): Launching all APIs | Timeout: {timeout_window}s")
+        
+        # Launch all APIs simultaneously
+        tasks = {}
+        start_times = {}
+        per_api_limit = max_results // len(apis_to_fetch)  # Distribute evenly
+        
+        for api in apis_to_fetch:
+            start_times[api] = time.time()
+            tasks[api] = asyncio.create_task(self._fetch_from_api(api, query, per_api_limit))
+        
+        # Wait for timeout window
+        done, pending = await asyncio.wait(
+            tasks.values(),
+            timeout=timeout_window,
+            return_when=asyncio.ALL_COMPLETED  # Collect all within window
+        )
+        
+        # Cancel any still-running tasks
+        for task in pending:
+            task.cancel()
+            logger.debug("⏸️ Cancelled slow API task")
+        
+        # Process results
+        all_papers = []
+        apis_used = []
+        fetch_times = {}
+        
+        for api, task in tasks.items():
+            elapsed = time.time() - start_times[api]
+            fetch_times[api] = round(elapsed, 2)
+            
+            if not task.done():
+                logger.warning(f"⏰ {api}: Timeout (>{timeout_window}s)")
+                continue
+            
+            try:
+                result = task.result()
+                if result:
+                    all_papers.extend(result)
+                    apis_used.append(api)
+                    logger.info(f"✅ {api}: {len(result)} papers in {elapsed:.1f}s")
+                else:
+                    logger.warning(f"⚠️ {api}: 0 papers in {elapsed:.1f}s")
+            except Exception as e:
+                logger.error(f"❌ {api} error: {e}")
+        
+        # Prioritize: Research papers before Wikipedia
+        all_papers = self._prioritize_sources(all_papers, apis_used)
+        
+        logger.info(f"🏁 Race complete: {len(all_papers)} papers from {len(apis_used)} APIs in <{timeout_window}s")
+        
+        return all_papers, apis_used, fetch_times
+    
+    def _prioritize_sources(self, papers: List[Dict], apis_used: List[str]) -> List[Dict]:
+        """
+        Prioritize papers by source quality:
+        1. Research papers (semantic_scholar, arxiv, openalex)
+        2. Wikipedia articles
+        
+        Args:
+            papers: Mixed list of papers
+            apis_used: List of APIs that provided results
+            
+        Returns:
+            Reordered papers with research first
+        """
+        research_papers = []
+        wikipedia_papers = []
+        
+        for paper in papers:
+            source = paper.get('source', '').lower()
+            if 'wikipedia' in source:
+                wikipedia_papers.append(paper)
+            else:
+                research_papers.append(paper)
+        
+        # Research first, wikipedia as supplement
+        prioritized = research_papers + wikipedia_papers
+        
+        if research_papers and wikipedia_papers:
+            logger.info(f"📊 Prioritized: {len(research_papers)} research + {len(wikipedia_papers)} wikipedia")
+        
+        return prioritized
+    
+    async def _sequential_fetch(
+        self,
+        primary_api: str,
+        fallback_apis: List[str],
+        query: str,
+        max_results: int
+    ) -> tuple[List[Dict], List[str], Dict[str, float]]:
+        """Sequential fetching (old behavior, for comparison)."""
+        import time
+        
+        papers = []
+        apis_used = []
+        fetch_times = {}
+        
+        # Try primary
+        try:
+            start = time.time()
+            papers = await self._fetch_from_api(primary_api, query, max_results)
+            fetch_times[primary_api] = round(time.time() - start, 2)
+            apis_used.append(primary_api)
+            
+            if papers:
+                logger.info(f"✅ Primary ({primary_api}): Got {len(papers)} papers")
+            else:
+                logger.warning(f"⚠️ Primary ({primary_api}) returned 0 papers")
+                
+        except Exception as e:
+            logger.error(f"❌ Primary ({primary_api}) error: {e}")
+        
+        # Try fallbacks if needed
+        if len(papers) < 5:
+            for fallback_api in fallback_apis:
+                if fallback_api in apis_used:
+                    continue
+                
+                try:
+                    start = time.time()
+                    fallback_papers = await self._fetch_from_api(fallback_api, query, max_results // 2)
+                    fetch_times[fallback_api] = round(time.time() - start, 2)
+                    
+                    if fallback_papers:
+                        papers.extend(fallback_papers)
+                        apis_used.append(fallback_api)
+                        logger.info(f"✅ Fallback ({fallback_api}): Added {len(fallback_papers)} papers")
+                        
+                        if len(papers) >= max_results:
+                            break
+                except Exception as e:
+                    logger.error(f"❌ Fallback ({fallback_api}) error: {e}")
+        
+        return papers, apis_used, fetch_times
+    
+    def _deduplicate_papers(self, papers: List[Dict]) -> List[Dict]:
+        """
+        Remove duplicate papers by DOI or title similarity.
+        
+        Args:
+            papers: List of paper dictionaries
+            
+        Returns:
+            Deduplicated list of papers
+        """
+        seen_dois = set()
+        seen_titles = set()
+        unique_papers = []
+        
+        for paper in papers:
+            # Check DOI
+            doi = (paper.get('doi') or '').lower().strip()
+            if doi:
+                if doi in seen_dois:
+                    logger.debug(f"🔄 Skipping duplicate DOI: {doi}")
+                    continue
+                seen_dois.add(doi)
+            
+            # Check title (case-insensitive, whitespace-stripped)
+            title = (paper.get('title') or '').lower().strip()
+            if title:
+                if title in seen_titles:
+                    logger.debug(f"🔄 Skipping duplicate title: {title[:50]}...")
+                    continue
+                seen_titles.add(title)
+            
+            unique_papers.append(paper)
+        
+        if len(papers) > len(unique_papers):
+            logger.info(f"🔄 Deduplicated: {len(papers)} → {len(unique_papers)} papers")
+        
+        return unique_papers
+    
+    async def _fetch_from_api(self, api_name: str, query: str, max_results: int) -> List[Dict]:
+        """
+        Fetch from a specific API.
+        
+        Args:
+            api_name: "arxiv", "openalex", "semantic_scholar", or "wikipedia"
+            query: Search query
+            max_results: Max results
+            
+        Returns:
+            List of paper dictionaries
+        """
+        if api_name == "arxiv":
+            return await self.arxiv.search(query, max_results)
+        elif api_name == "openalex":
+            return await self.openalex.search(query, max_results)
+        elif api_name == "semantic_scholar":
+            return await asyncio.wait_for(
+                self.semantic_scholar.search(query, max_results),
+                timeout=10.0
+            )
+        elif api_name == "wikipedia":
+            # Wikipedia API is async - call directly, returns single Dict or None
+            result = await self.wikipedia_api.search(query)
+            return [result] if result else []
+        else:
+            logger.error(f"❌ Unknown API: {api_name}")
+            return []
     
     async def fetch_arxiv(self, query: str, max_results: int = 5) -> List[Dict]:
         """
@@ -26,7 +430,11 @@ class DataFetcher:
         logger.info(f"📊 DataFetcher: Fetching papers for query: '{query}'")
         
         try:
-            results = await self.semantic_scholar.search(query, max_results)
+            # ⚡ Phase 1: Add timeout to API call
+            results = await asyncio.wait_for(
+                self.semantic_scholar.search(query, max_results),
+                timeout=10.0  # 10 second timeout for API call
+            )
             
             if results:
                 logger.info(f"✅ REAL DATA: Found {len(results)} papers from Semantic Scholar")
@@ -46,6 +454,21 @@ class DataFetcher:
                     })
                 
                 return fallback_results
+        
+        except asyncio.TimeoutError:
+            logger.warning(f"⚠️ API TIMEOUT: Semantic Scholar took > 10 seconds, using fallback")
+            fallback_results = self._create_educational_fallback(query, max_results)
+            
+            for result in fallback_results:
+                result.update({
+                    'source': 'educational_content',
+                    'content_type': 'educational_fallback',
+                    'fallback_reason': 'semantic_scholar_timeout',
+                    'api_source': 'Educational Fallback System',
+                    'retrieved_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                })
+            
+            return fallback_results
         
         except Exception as e:
             logger.error(f"❌ API ERROR: {str(e)}")
@@ -256,7 +679,11 @@ class DataFetcher:
         """Fetch Wikipedia article as supplementary source."""
         logger.info(f"📖 DataFetcher: Fetching Wikipedia data for query: '{query}'")
         try:
-            result = await self.wikipedia_api.search(query)
+            # ⚡ Phase 1: Add timeout to Wikipedia API call
+            result = await asyncio.wait_for(
+                self.wikipedia_api.search(query),
+                timeout=10.0  # 10 second timeout
+            )
             
             if result:
                 wikipedia_result = {
@@ -277,6 +704,9 @@ class DataFetcher:
             else:
                 logger.warning(f"📭 WIKIPEDIA: No article found for '{query}'")
                 return []
+        except asyncio.TimeoutError:
+            logger.warning(f"⚠️ WIKIPEDIA TIMEOUT: API took > 10 seconds for '{query}'")
+            return []
         except Exception as e:
             logger.warning(f"❌ WIKIPEDIA ERROR: {str(e)}")
             return []
@@ -284,15 +714,26 @@ class DataFetcher:
     async def fetch_all(self, query: str, max_results: int = 5) -> List[Dict]:
         """
         Fetch from all available sources with full tracking.
+        ⚡ Phase 1: Parallel fetch with timeout for speed
         """
         logger.info(f"🚀 DataFetcher: Fetching data from all sources for query: '{query}'")
         
-        # Fetch academic papers (Semantic Scholar with smart fallback)
-        papers = await self.fetch_arxiv(query, max_results)
-        logger.info(f"📚 Academic papers: {len(papers)}")
+        # ⚡ Phase 1: Fetch in parallel for speed
+        try:
+            papers_task = asyncio.create_task(self.fetch_arxiv(query, max_results))
+            wiki_task = asyncio.create_task(self.fetch_wikipedia(query))
+            
+            # Wait for both with 20 second total timeout
+            papers, wikipedia_results = await asyncio.wait_for(
+                asyncio.gather(papers_task, wiki_task),
+                timeout=20.0
+            )
+        except asyncio.TimeoutError:
+            logger.warning(f"⚠️ FETCH_ALL TIMEOUT: Using partial results")
+            papers = papers_task.result() if papers_task.done() else []
+            wikipedia_results = wiki_task.result() if wiki_task.done() else []
         
-        # Fetch Wikipedia as supplementary source
-        wikipedia_results = await self.fetch_wikipedia(query)
+        logger.info(f"📚 Academic papers: {len(papers)}")
         logger.info(f"📖 Wikipedia results: {len(wikipedia_results)}")
         
         # Combine results

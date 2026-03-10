@@ -1,177 +1,229 @@
 import logging
+import asyncio
 from .base import AgentInput, AgentOutput
-from transformers import pipeline
-import torch
 import re
+from typing import List, Tuple
+from collections import Counter
+import os
 
 logger = logging.getLogger(__name__)
 
 class SummarizerAgent:
+    """
+    LLM-based abstractive summarizer using Groq API (Cloud-hosted Llama).
+    
+    Performance: ~1-3s (GPU-accelerated cloud inference)
+    Quality: Natural, coherent answers (better than local 3B)
+    Memory: 0 (cloud API)
+    Cost: FREE tier (30 req/min) or $0.10 per 1M tokens
+    
+    Strategy:
+    1. Extract relevant context from research papers
+    2. Synthesize coherent answer using Groq's Llama 3.1 8B
+    3. Ground response in paper findings
+    """
+    
     def __init__(self):
-        logger.info("Initializing SummarizerAgent with BART model")
-        self.device = 0 if torch.cuda.is_available() else -1  # Use GPU if available, else CPU
         try:
-            self.summarizer = pipeline("summarization", model="facebook/bart-large-cnn", device=self.device)
-            logger.info("✅ BART model loaded successfully")
-        except Exception as e:
-            logger.error(f"❌ Failed to load BART model: {str(e)}")
-            self.summarizer = None
-
-    def _validate_context(self, context: str) -> str:
-        """Validate and clean context for summarization."""
-        if not context or not isinstance(context, str):
-            logger.warning("⚠️ Invalid context: not a string or empty")
-            return ""
-        
-        # Clean up whitespace
-        context = context.strip()
-        context = re.sub(r'\s+', ' ', context)  # Normalize whitespace
-        
-        # Minimum context length for BART (need at least 50 tokens)
-        min_tokens = 50
-        token_count = len(context.split())
-        
-        if token_count < min_tokens:
-            logger.warning(f"⚠️ Context too short: {token_count} tokens (need {min_tokens})")
-            return ""
-        
-        logger.debug(f"✅ Context validated: {token_count} tokens")
-        return context
+            from groq import Groq
+            
+            # Initialize Groq client
+            api_key = os.environ.get("GROQ_API_KEY")
+            if not api_key:
+                logger.warning("⚠️ GROQ_API_KEY not set, will use fallback extractive summarization")
+                self.client = None
+            else:
+                self.client = Groq(api_key=api_key)
+                logger.info("✅ SummarizerAgent initialized with Groq API (llama-3.1-8b-instant)")
+            
+            # Model selection: Fast mode uses same model (Groq is already fast)
+            self.model_name = "llama-3.1-8b-instant"  # ~1-3s inference
+            
+        except ImportError:
+            logger.error("❌ Groq SDK not installed. Install: pip install groq")
+            self.client = None
 
     async def run(self, input_data: AgentInput) -> AgentOutput:
-        logger.info(f"🔄 Running SummarizerAgent with query: {input_data.query}")
+        """
+        LLM-based abstractive summarization using Groq API.
+        Fast for both modes (~1-3s GPU inference).
+        """
+        # Extract mode from metadata (not used for Groq, but kept for compatibility)
+        mode = input_data.metadata.get('mode', 'thorough') if input_data.metadata else 'thorough'
+        
+        logger.info(f"🔄 Running SummarizerAgent (Groq API, {mode.upper()} mode) with query: {input_data.query}")
+        
+        if not self.client:
+            logger.error("❌ Groq API not available, falling back to extractive summarization")
+            return self._fallback_extractive(input_data)
+        
         try:
-            # Validate context
-            context = self._validate_context(input_data.context)
+            context = input_data.context
             
-            if not context:
-                logger.warning("❌ No valid context provided for summarization")
+            if not context or not isinstance(context, str):
+                logger.warning("❌ No valid context provided")
                 return AgentOutput(
-                    result="", 
-                    confidence=0.0, 
-                    metadata={
-                        "source": "summarizer",
-                        "error": "Invalid or insufficient context",
-                        "query": input_data.query
-                    }
+                    result="",
+                    confidence=0.0,
+                    metadata={"source": "summarizer", "error": "Invalid context"}
                 )
             
-            if not self.summarizer:
-                logger.error("❌ BART model not initialized")
+            # Validate minimum length
+            if len(context.split()) < 20:
+                logger.warning(f"⚠️ Context too short: {len(context.split())} words")
                 return AgentOutput(
-                    result="", 
-                    confidence=0.0, 
-                    metadata={
-                        "source": "summarizer",
-                        "error": "Summarization model unavailable"
-                    }
+                    result=context[:500],
+                    confidence=0.5,
+                    metadata={"source": "summarizer", "warning": "Context too short"}
                 )
             
-            # Calculate dynamic length parameters
-            input_length = len(context.split())
-            max_length = min(150, max(50, input_length // 3))  # 1/3 of input or 50-150
-            min_length = min(40, max(20, input_length // 6))   # 1/6 of input or 20-40
+            # Fast mode: shorter context + fewer tokens = faster Groq response
+            is_fast = mode == 'fast'
+            prompt = self._create_synthesis_prompt(input_data.query, context, fast=is_fast)
+            max_tokens = 200 if is_fast else 400  # Shorter in fast mode
+            groq_timeout = 8.0 if is_fast else 10.0  # Tighter timeout in fast mode
             
-            logger.debug(f"📊 Summarization params: max_length={max_length}, min_length={min_length}")
+            # Call Groq API for synthesis (run in executor to avoid blocking event loop)
+            logger.info(f"🧠 Calling Groq API ({self.model_name}) for synthesis ({mode} mode)...")
+            import time
+            start = time.time()
             
-            try:
-                # Run summarization with error handling
-                summary_result = self.summarizer(
-                    context,
-                    max_length=max_length,
-                    min_length=min_length,
-                    do_sample=False
-                )
-                
-                if not summary_result or not summary_result[0]:
-                    logger.error("❌ Summarizer returned empty result")
-                    return AgentOutput(
-                        result="", 
-                        confidence=0.0, 
-                        metadata={
-                            "source": "summarizer",
-                            "error": "Summarizer returned empty"
-                        }
+            # Use Groq's chat completion API (sync SDK, run in thread to avoid blocking)
+            loop = asyncio.get_running_loop()
+            response = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: self.client.chat.completions.create(
+                        model=self.model_name,
+                        messages=[
+                            {
+                                "role": "system",
+                                "content": "You are a research assistant that synthesizes academic findings into clear, concise answers."
+                            },
+                            {
+                                "role": "user",
+                                "content": prompt
+                            }
+                        ],
+                        temperature=0.7,
+                        max_tokens=max_tokens,
+                        top_p=0.9
                     )
-                
-                summary = summary_result[0]['summary_text'].strip()
-                confidence = 0.92  # High confidence for BART-generated summaries
-                
-                logger.info(f"✅ Summary generated: {summary[:60]}... (confidence: {confidence:.2f})")
-                
-                return AgentOutput(
-                    result=summary,
-                    confidence=confidence,
-                    metadata={
-                        "source": "summarizer",
-                        "input_tokens": input_length,
-                        "model": "facebook/bart-large-cnn",
-                        "query": input_data.query
-                    }
-                )
-                
-            except RuntimeError as e:
-                logger.error(f"❌ BART Runtime Error: {str(e)}")
-                # Fallback: Extract first meaningful sentences
-                return AgentOutput(
-                    result=self._extractive_fallback(context, max_length),
-                    confidence=0.65,
-                    metadata={
-                        "source": "summarizer",
-                        "method": "extractive_fallback",
-                        "error": f"BART failed: {str(e)}"
-                    }
-                )
+                ),
+                timeout=groq_timeout
+            )
             
-        except Exception as e:
-            logger.error(f"❌ Critical error in SummarizerAgent: {str(e)}", exc_info=True)
+            elapsed = time.time() - start
+            summary = response.choices[0].message.content.strip()
+            
+            # Validate output quality
+            if len(summary) < 50:
+                logger.warning(f"⚠️ LLM output too short ({len(summary)} chars), using fallback")
+                return self._fallback_extractive(input_data)
+            
+            # Calculate confidence based on response quality
+            confidence = self._calculate_confidence(summary, input_data.query)
+            
+            logger.info(f"✅ Groq summary generated: {len(summary)} chars in {elapsed:.2f}s (confidence: {confidence:.2f})")
+            
             return AgentOutput(
-                result="", 
-                confidence=0.0, 
+                result=summary,
+                confidence=confidence,
                 metadata={
                     "source": "summarizer",
-                    "error": f"Unexpected error: {str(e)}"
+                    "method": "groq_api",
+                    "model": self.model_name,
+                    "time_ms": int(elapsed * 1000),
+                    "response_length": len(summary)
                 }
             )
-
-    def _extractive_fallback(self, context: str, max_length: int) -> str:
-        """Simple extractive summarization fallback when BART fails."""
-        try:
-            if not context or len(context.strip()) < 10:
-                logger.warning("[FALLBACK] Context too short for fallback")
-                return ""
             
-            # Split into sentences
-            sentences = re.split(r'[.!?]+', context)
-            sentences = [s.strip() for s in sentences if s.strip() and len(s.strip()) > 10]
-            
-            if not sentences:
-                # If no sentences, just return first part of context
-                logger.info("[FALLBACK] No sentences found, using truncated context as summary")
-                return context[:300].strip()
-            
-            # Take first N sentences that fit max_length tokens
-            summary_sentences = []
-            token_count = 0
-            
-            for sentence in sentences[:5]:  # Max 5 sentences
-                sentence_tokens = len(sentence.split())
-                if token_count + sentence_tokens <= max_length * 1.5:  # Allow some flexibility
-                    summary_sentences.append(sentence.strip() + ".")
-                    token_count += sentence_tokens
-                else:
-                    break
-            
-            if summary_sentences:
-                fallback = " ".join(summary_sentences)
-                logger.info(f"[FALLBACK] Extractive summary: {fallback[:60]}...")
-                return fallback
-            else:
-                # If no sentences fit, use truncated context
-                logger.info("[FALLBACK] Returning truncated context")
-                return context[:300].strip()
-            
+        except asyncio.TimeoutError:
+            logger.warning(f"⚠️ Groq API timeout (>10s), using extractive fallback")
+            return self._fallback_extractive(input_data)
         except Exception as e:
-            logger.error(f"[FALLBACK] Extractive fallback failed: {str(e)}")
-            # Ultimate fallback: return first 300 chars
-            return context[:300].strip() if context else ""
+            logger.error(f"❌ Error in Groq API summarizer: {str(e)}", exc_info=True)
+            logger.info("⚠️ Falling back to extractive summarization")
+            return self._fallback_extractive(input_data)
+    
+    def _create_synthesis_prompt(self, query: str, context: str, fast: bool = False) -> str:
+        """Create prompt for LLM synthesis."""
+        # Truncate context to keep prompts short and responses fast
+        max_context_words = 300 if fast else 600
+        context_words = context.split()
+        if len(context_words) > max_context_words:
+            context = ' '.join(context_words[:max_context_words]) + "..."
+        
+        if fast:
+            prompt = f"""Synthesize the research findings below into a direct answer (80-120 words).
+
+Question: {query}
+
+Research:
+{context}
+
+Answer concisely using "research shows", "studies found" etc:"""
+        else:
+            prompt = f"""You are a research assistant synthesizing findings from academic papers.
+
+User Question: {query}
+
+Research Findings:
+{context}
+
+Task: Write a clear, concise answer (150-200 words) that:
+1. Directly addresses the user's question
+2. Synthesizes key findings from the research
+3. Uses natural language (not bullet points or lists)
+4. Cites general patterns (e.g., "studies show", "research found")
+5. If papers don't directly answer the question, explain what they DO cover
+
+Answer:"""
+        
+        return prompt
+    
+    def _calculate_confidence(self, summary: str, query: str) -> float:
+        """Calculate confidence score for LLM output."""
+        # Basic heuristics for confidence
+        query_words = set(query.lower().split())
+        summary_words = set(summary.lower().split())
+        
+        # Keyword overlap
+        overlap = len(query_words & summary_words) / max(len(query_words), 1)
+        
+        # Length check (prefer 100-300 words)
+        word_count = len(summary.split())
+        if 100 <= word_count <= 300:
+            length_score = 1.0
+        elif word_count < 100:
+            length_score = word_count / 100
+        else:
+            length_score = max(0.5, 1.0 - (word_count - 300) / 500)
+        
+        # Check for hedging phrases (lower confidence)
+        hedging = ['may', 'might', 'possibly', 'unclear', 'limited research']
+        hedge_count = sum(1 for word in hedging if word in summary.lower())
+        hedge_penalty = min(0.2, hedge_count * 0.05)
+        
+        confidence = min(0.95, 0.6 + overlap * 0.2 + length_score * 0.15 - hedge_penalty)
+        return confidence
+    
+    def _fallback_extractive(self, input_data: AgentInput) -> AgentOutput:
+        """Fallback to simple extractive summarization if LLM fails."""
+        logger.info("📝 Using fallback extractive summarization")
+        
+        context = input_data.context
+        sentences = context.split('. ')[:5]  # Take first 5 sentences
+        summary = '. '.join(sentences)
+        if not summary.endswith('.'):
+            summary += '.'
+        
+        return AgentOutput(
+            result=summary,
+            confidence=0.5,
+            metadata={
+                "source": "summarizer",
+                "method": "extractive_fallback",
+                "warning": "LLM unavailable"
+            }
+        )
