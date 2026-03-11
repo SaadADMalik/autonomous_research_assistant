@@ -653,7 +653,10 @@ class DataFetcher:
         ]
     
     def _get_generic_papers(self, query: str) -> List[Dict]:
-        """Generate generic academic papers for unknown topics."""
+        """
+        Generate generic academic papers for unknown topics.
+        ⚠️ IMPORTANT: Keep summaries topic-neutral - NO hardcoded ML/computational terms!
+        """
         return [
             {
                 "title": f"Comprehensive Survey of {query.title()}: Current State and Future Directions",
@@ -665,13 +668,13 @@ class DataFetcher:
                 "venue": "Annual Review of Research"
             },
             {
-                "title": f"Novel Methodologies in {query.title()}: A Computational Approach",
-                "summary": f"We present novel computational methodologies for advancing research in {query}. Our approach combines machine learning techniques with domain-specific knowledge to address current limitations in the field. Experimental validation demonstrates significant improvements over existing methods, with applications across multiple domains. The work opens new avenues for interdisciplinary research and provides a foundation for future algorithmic developments.",
-                "url": "https://example.edu/novel-methodologies",
+                "title": f"Empirical Analysis of {query.title()}: Evidence and Implications",
+                "summary": f"We present a large-scale empirical analysis of {query}, drawing from diverse data sources and multiple methodological perspectives. Our findings reveal significant patterns and relationships that advance theoretical understanding in the field. The study includes extensive statistical validation and discusses implications for policy, practice, and future research. Results highlight important considerations for practitioners and identify critical areas requiring further investigation.",
+                "url": "https://example.edu/empirical-analysis",
                 "year": 2024,
-                "authors": ["Dr. Computational Methods", "Prof. Algorithm Development", "Dr. Novel Approaches"],
+                "authors": ["Dr. Empirical Research", "Prof. Data Analysis", "Dr. Evidence Studies"],
                 "citations": 89,
-                "venue": "Journal of Computational Research"
+                "venue": "Journal of Empirical Research"
             }
         ]
     
