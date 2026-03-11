@@ -429,8 +429,8 @@ class ConversationManager:
                 cached_paper_titles=paper_titles
             )
             
-            # Use cache only if relevance is high (>0.6)
-            if relevance_score >= 0.6:
+            # Use cache only if relevance is high (>0.7 = 70%+ match)
+            if relevance_score >= 0.7:
                 logger.info(f"✅ Using {len(cached_papers)} cached papers (relevance: {relevance_score:.2f})")
                 return (True, cached_papers, query_intent)
             else:

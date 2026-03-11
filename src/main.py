@@ -211,6 +211,36 @@ async def _process_query(request: QueryRequest, mode: str = "thorough", max_atte
             logger.error(f"💥 PIPELINE FAILED: {error_msg}")
             raise HTTPException(status_code=500, detail=f"Pipeline error: {error_msg}")
         
+        # 🎯 HYBRID APPROACH: Post-generation validation (0.5s overhead)
+        # Validates answer relevance and retries with fresh papers if hallucinating
+        validation_result = None
+        if query_intent and conversation_manager.intent_analyzer and is_follow_up and cached_papers:
+            # Only validate when using cached papers for follow-ups
+            validation_start = time.time()
+            validation_result = conversation_manager.intent_analyzer.validate_answer_relevance(
+                query=original_query,
+                answer=result.result,
+                query_intent=query_intent
+            )
+            timing_metrics['validation'] = time.time() - validation_start
+            
+            # If validation failed (hallucination detected), retry with fresh papers
+            if not validation_result.get('is_relevant', True):
+                logger.warning(f"⚠️ HALLUCINATION DETECTED: {validation_result.get('reason', 'Unknown')} - Retrying with fresh papers...")
+                
+                # Retry: Fetch fresh papers and regenerate
+                retry_start = time.time()
+                result = await orchestrator.run_agentic_pipeline(
+                    query=corrected_query,
+                    max_results=request.max_results,
+                    max_attempts=max_attempts,
+                    mode=mode,
+                    conversation_context=conversation_context,
+                    cached_papers=None  # 🚨 Force fetch fresh papers, don't use cache
+                )
+                timing_metrics['retry_after_validation'] = time.time() - retry_start
+                logger.info(f"✅ RETRY COMPLETE: Generated new answer with fresh papers")
+        
         # Extract metadata from agentic pipeline
         reasoning_attempts = result.metadata.get("reasoning_attempts", [])
         final_query = result.metadata.get("final_query", corrected_query)

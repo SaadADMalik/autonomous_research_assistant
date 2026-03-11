@@ -167,3 +167,92 @@ Respond with ONLY a number between 0.0 and 1.0 (e.g., 0.85)"""
         except Exception as e:
             logger.warning(f"⚠️ Cache relevance check failed: {e}")
             return 0.5  # Default to medium relevance if check fails
+    
+    def validate_answer_relevance(
+        self,
+        query: str,
+        answer: str,
+        query_intent: Dict[str, any]
+    ) -> Dict[str, any]:
+        """
+        🎯 POST-GENERATION VALIDATION: Check if answer actually matches query topic.
+        
+        Prevents hallucinations like answering "male dominance" query with "machine learning" content.
+        
+        Returns:
+            {
+                "is_relevant": bool,
+                "confidence": float (0.0-1.0),
+                "reason": str (why relevant/not relevant)
+            }
+        """
+        try:
+            main_topic = query_intent.get('main_topic', 'unknown')
+            key_concepts = query_intent.get('key_concepts', [])
+            
+            # Extract first 500 chars of answer for validation
+            answer_preview = answer[:500]
+            
+            prompt = f"""Validate if this answer is relevant to the query.
+
+Query: "{query}"
+Expected topic: {main_topic}
+Expected concepts: {', '.join(key_concepts)}
+
+Generated answer (first 500 chars):
+"{answer_preview}"
+
+CRITICAL CHECKS:
+1. Does the answer address the query topic?
+2. Does the answer contain concepts related to the query?
+3. Is the answer on a completely different topic (hallucination)?
+
+Examples of HALLUCINATIONS (answer is NOT relevant):
+- Query: "male dominance in society" + Answer about "machine learning techniques" = NOT RELEVANT
+- Query: "why philosophers are unhappy" + Answer about "computational methods" = NOT RELEVANT
+- Query: "cloning animals" + Answer about "climate change" = NOT RELEVANT
+
+Respond in JSON:
+{{
+    "is_relevant": true/false,
+    "confidence": 0.0-1.0,
+    "reason": "brief explanation"
+}}"""
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=150
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            
+            # Extract JSON
+            import json
+            if "```json" in result_text:
+                result_text = result_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in result_text:
+                result_text = result_text.split("```")[1].split("```")[0].strip()
+            
+            result = json.loads(result_text)
+            
+            is_relevant = result.get("is_relevant", True)
+            confidence = result.get("confidence", 0.5)
+            reason = result.get("reason", "Unknown")
+            
+            if is_relevant:
+                logger.info(f"✅ Answer validation PASSED: {reason}")
+            else:
+                logger.warning(f"❌ Answer validation FAILED: {reason} - Will retry with fresh papers")
+            
+            return result
+            
+        except Exception as e:
+            logger.warning(f"⚠️ Answer validation failed: {e}, assuming answer is relevant")
+            # On error, assume answer is relevant (fail-safe)
+            return {
+                "is_relevant": True,
+                "confidence": 0.5,
+                "reason": "Validation error, assuming relevant"
+            }
