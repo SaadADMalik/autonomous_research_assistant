@@ -32,10 +32,13 @@ class OpenAlexAPI:
     # Email for polite pool (gets better rate limits)
     CONTACT_EMAIL = "researcher@autonomous-ai.edu"
     
+    # API Key for higher rate limits (100 req/sec vs 10 req/sec)
+    API_KEY = "VtTL2uEKq5an9RlGeOvvrq"  # Free tier: $1/day = 1000 searches
+    
     def __init__(self):
         self.last_request_time = 0
         self.session: Optional[aiohttp.ClientSession] = None
-        logger.info("✅ OpenAlexAPI initialized (polite pool: 10 RPS)")
+        logger.info("✅ OpenAlexAPI initialized with API key (100 RPS, $1/day free)")
     
     async def _get_session(self) -> aiohttp.ClientSession:
         """Get or create aiohttp session with polite pool headers."""
@@ -84,16 +87,18 @@ class OpenAlexAPI:
         
         # Build query URL
         # OpenAlex uses 'search' parameter for full-text search
+        # NOTE: 🚨 Sort parameter causes 0 results when combined with search! Using default relevance sort instead.
         params = {
             'search': query,
             'per_page': min(max_results, 50),  # Max 50 per request
-            'sort': sort,
-            'filter': 'has_abstract:true,language:en'  # Only English papers with abstracts
+            'api_key': self.API_KEY  # 🔑 Add API key for better rate limits
         }
         
-        url = f"{self.BASE_URL}?search={quote(query)}&per_page={params['per_page']}&sort={params['sort']}&filter={params['filter']}"
+        # Don't add filter - causes compatibility issues with sort
+        url = f"{self.BASE_URL}?search={quote(query)}&per_page={params['per_page']}&api_key={self.API_KEY}"
         
         logger.info(f"🔍 OpenAlex: Searching for '{query}' (max_results={max_results})")
+        logger.info(f"🌐 OpenAlex URL: {url}")  # 🐛 DEBUG: Log actual URL
         
         try:
             session = await self._get_session()
@@ -103,10 +108,13 @@ class OpenAlexAPI:
                     return []
                 
                 data = await response.json()
+                logger.info(f"🐛 OpenAlex raw results count: {len(data.get('results', []))}")  # DEBUG
                 papers = self._parse_response(data)
                 
                 # Log API fetch performance
                 fetch_duration = asyncio.get_event_loop().time() - search_start
+                if len(papers) == 0:
+                    logger.warning(f"⚠️ OpenAlex: No results found")
                 logger.info(f"⏱️  OpenAlex API fetch: {fetch_duration:.2f}s ({len(papers)} papers)")
                 
                 return papers
@@ -173,21 +181,29 @@ class OpenAlexAPI:
                 doi = result.get('doi', '')
                 paper_url = doi if doi else result.get('id', '')
                 
-                # Extract authors
+                # Extract authors (handle None values)
                 authorships = result.get('authorships', [])
-                authors = [
-                    auth.get('author', {}).get('display_name', 'Unknown')
-                    for auth in authorships[:10]  # Limit to first 10 authors
-                ]
+                authors = []
+                if authorships:
+                    for auth in authorships[:10]:  # Limit to first 10 authors
+                        if auth and isinstance(auth, dict):
+                            author_obj = auth.get('author')
+                            if author_obj and isinstance(author_obj, dict):
+                                name = author_obj.get('display_name')
+                                if name:
+                                    authors.append(name)
                 
                 # Extract publication year
                 pub_date = result.get('publication_date', '')
                 year = int(pub_date[:4]) if pub_date and len(pub_date) >= 4 else 2024
                 
-                # Extract venue/journal
-                primary_location = result.get('primary_location', {})
-                source = primary_location.get('source', {})
-                venue = source.get('display_name', 'Unknown Venue')
+                # Extract venue/journal (handle None values)
+                primary_location = result.get('primary_location')
+                venue = 'Unknown Venue'
+                if primary_location and isinstance(primary_location, dict):
+                    source = primary_location.get('source')
+                    if source and isinstance(source, dict):
+                        venue = source.get('display_name', 'Unknown Venue')
                 
                 # Extract citation count
                 citations = result.get('cited_by_count', 0)

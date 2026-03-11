@@ -7,6 +7,8 @@ from src.utils.semantic_scholar_api import SemanticScholarAPI
 from src.utils.wikipedia_utils import WikipediaAPI
 from src.utils.arxiv_api import ArxivAPI
 from src.utils.openalex_api import OpenAlexAPI
+from src.utils.pubmed_api import PubMedAPI
+from src.utils.core_api import CoreAPI
 from src.agents.api_router_agent import APIRouterAgent
 from src.utils.relevance_filter import RelevanceFilter
 
@@ -30,18 +32,24 @@ class DataFetcher:
         self.arxiv = ArxivAPI()
         self.openalex = OpenAlexAPI()
         
+        # 🎯 Phase 5: Medical & Open Access APIs
+        pubmed_key = os.getenv('PUBMED_API_KEY')  # Optional - get free at https://www.ncbi.nlm.nih.gov/account/
+        core_key = os.getenv('CORE_API_KEY')  # Optional - get free at https://core.ac.uk/services/api
+        self.pubmed = PubMedAPI(pubmed_key)
+        self.core = CoreAPI(core_key)
+        
         # 🎯 Phase 3: Smart routing
         self.router = APIRouterAgent()
         
         # Relevance filter to remove off-topic papers
         self.relevance_filter = RelevanceFilter()
         
-        logger.info("✅ DataFetcher initialized with 4 APIs (arXiv, OpenAlex, Semantic Scholar, Wikipedia)")
+        logger.info("✅ DataFetcher initialized with 6 APIs (arXiv, OpenAlex, Semantic Scholar, Wikipedia, PubMed, CORE)")
     
     async def fetch_with_smart_routing(
         self, 
         query: str, 
-        max_results: int = 15,  # 🎯 Phase 4: Increased to 15 (production optimal)
+        max_results: int = 20,  # 🎯 Phase 4: Increased to 20 (with 3 APIs → 6-7 papers each)
         parallel_fetch: bool = True,  # 🎯 Phase 4: Enable parallel fetching
         try_fallbacks: bool = True,  # Backward compatibility (deprecated, now always uses fallbacks)
         mode: str = "thorough"  # 🎯 Phase 1: "fast" or "thorough"
@@ -102,10 +110,10 @@ class DataFetcher:
             if "wikipedia" not in fallback_apis and primary_api != "wikipedia":
                 fallback_apis.append("wikipedia")
 
-            # Reduce max_results for speed
-            if max_results > 5:
-                logger.info(f"FAST MODE: Reducing max_results from {max_results} to 5 for speed")
-                max_results = 5
+            # 🎯 FIX: Keep user's max_results, don't reduce (was causing 1 paper per API bottleneck)
+            # Previously reduced to 5, causing 5÷4 APIs = 1 paper each
+            # Now with max_results=20, each API gets ~5 papers instead of 1
+            pass  # Removed: max_results = 5
         
         logger.info(f"🧭 Router Decision: Primary={primary_api}, Domain={routing['domain']}, Confidence={routing['confidence']:.2f}")
         
@@ -147,6 +155,7 @@ class DataFetcher:
             papers = self.relevance_filter.filter_papers(query, papers)
         
         # Last resort: educational fallback
+        # 🎯 Re-enabled after testing - triggers only if all APIs truly fail
         if not papers:
             logger.warning("⚠️ All APIs failed - using educational fallback")
             papers = self._create_educational_fallback(query, max_results)
@@ -208,65 +217,137 @@ class DataFetcher:
         apis_to_fetch = []
         
         if mode == "fast":
-            # Fast mode: openalex + semantic_scholar + wikipedia (skip arxiv=30s)
-            apis_to_fetch = ["openalex", "semantic_scholar", "wikipedia"]
-            timeout_window = 8.0  # 8s window - enough for OpenAlex (~3-5s)
-            logger.info(f"RACE MODE (FAST): Launching {apis_to_fetch} | Timeout: {timeout_window}s")
+            # Fast mode: ALL APIs race asynchronously - FIRST with results wins!
+            # 🚀 TRUE RACE: Cancel others as soon as one responds with papers
+            apis_to_fetch = ["openalex", "pubmed", "core", "arxiv", "wikipedia"]
+            timeout_window = 10.0  # 10s max, but usually wins in 2-4s
+            logger.info(f"🏁 TRUE RACE MODE (FAST): First responder wins | Timeout: {timeout_window}s")
+            logger.info(f"   📡 Racing: {', '.join(apis_to_fetch)}")
         else:
-            # Thorough mode: All APIs
-            apis_to_fetch = ["openalex", "semantic_scholar", "wikipedia", "arxiv"]
-            timeout_window = 15.0  # 15 second window
-            logger.info(f"RACE MODE (THOROUGH): Launching all APIs | Timeout: {timeout_window}s")
+            # Thorough mode: Wait for multiple APIs (collect more papers)
+            apis_to_fetch = ["openalex", "pubmed", "core", "arxiv", "wikipedia"]
+            timeout_window = 20.0
+            logger.info(f"🏁 THOROUGH MODE: Collecting from multiple APIs | Timeout: {timeout_window}s")
+            logger.info(f"   📡 Fetching: {', '.join(apis_to_fetch)}")
         
         # Launch all APIs simultaneously
         tasks = {}
         start_times = {}
-        per_api_limit = max_results // len(apis_to_fetch)  # Distribute evenly
+        per_api_limit = max(5, max_results // len(apis_to_fetch))  # At least 5 per API
         
         for api in apis_to_fetch:
             start_times[api] = time.time()
             tasks[api] = asyncio.create_task(self._fetch_from_api(api, query, per_api_limit))
         
-        # Wait for timeout window
-        done, pending = await asyncio.wait(
-            tasks.values(),
-            timeout=timeout_window,
-            return_when=asyncio.ALL_COMPLETED  # Collect all within window
-        )
+        race_start = time.time()
         
-        # Cancel any still-running tasks
-        for task in pending:
-            task.cancel()
-            logger.debug("⏸️ Cancelled slow API task")
-        
-        # Process results
-        all_papers = []
-        apis_used = []
-        fetch_times = {}
-        
-        for api, task in tasks.items():
-            elapsed = time.time() - start_times[api]
-            fetch_times[api] = round(elapsed, 2)
+        if mode == "fast":
+            # 🏆 FAST MODE: True race - first non-empty result wins
+            all_papers = []
+            apis_used = []
+            fetch_times = {}
+            winning_api = None
             
-            if not task.done():
-                logger.warning(f"⏰ {api}: Timeout (>{timeout_window}s)")
-                continue
+            # Check tasks as they complete
+            while tasks:
+                done, pending_tasks = await asyncio.wait(
+                    tasks.values(),
+                    return_when=asyncio.FIRST_COMPLETED,
+                    timeout=timeout_window - (time.time() - race_start)
+                )
+                
+                # Check completed tasks for non-empty results
+                for completed_task in done:
+                    api_name = [k for k, v in tasks.items() if v == completed_task][0]
+                    elapsed = time.time() - start_times[api_name]
+                    fetch_times[api_name] = round(elapsed, 2)
+                    
+                    try:
+                        result = await completed_task
+                        if result and len(result) > 0:
+                            # Winner found!
+                            all_papers = result
+                            apis_used = [api_name]
+                            winning_api = api_name
+                            logger.info(f"🏆 {api_name} WON THE RACE with {len(result)} papers in {elapsed:.1f}s!")
+                            
+                            # Cancel all other tasks
+                            for other_api, task in tasks.items():
+                                if other_api != api_name and not task.done():
+                                    task.cancel()
+                                    logger.debug(f"⏸️ Cancelled {other_api} (race won)")
+                            
+                            # Exit race immediately
+                            break
+                        else:
+                            logger.warning(f"⚠️ {api_name}: 0 papers in {elapsed:.1f}s")
+                            tasks.pop(api_name)
+                    except Exception as e:
+                        logger.error(f"❌ {api_name} FAILED: {e}")
+                        tasks.pop(api_name)
+                
+                # If we found a winner, break out
+                if winning_api:
+                    break
+                
+                # If timeout exceeded, break out
+                if time.time() - race_start >= timeout_window:
+                    logger.warning(f"⏰ Race timeout ({timeout_window}s) - no papers found")
+                    for task in tasks.values():
+                        if not task.done():
+                            task.cancel()
+                    break
+                
+                # If no tasks left, break
+                if not tasks:
+                    logger.warning("⚠️ All APIs completed without results")
+                    break
             
-            try:
-                result = task.result()
-                if result:
-                    all_papers.extend(result)
-                    apis_used.append(api)
-                    logger.info(f"✅ {api}: {len(result)} papers in {elapsed:.1f}s")
-                else:
-                    logger.warning(f"⚠️ {api}: 0 papers in {elapsed:.1f}s")
-            except Exception as e:
-                logger.error(f"❌ {api} error: {e}")
+            if not all_papers:
+                logger.warning(f"⚠️ Race failed: No API returned papers within {timeout_window}s")
+            
+        else:
+            # 🔬 THOROUGH MODE: Collect from multiple APIs for better coverage
+            done, pending = await asyncio.wait(
+                tasks.values(),
+                timeout=timeout_window,
+                return_when=asyncio.ALL_COMPLETED
+            )
+            
+            # Cancel any still-running tasks
+            for task in pending:
+                task.cancel()
+                logger.debug("⏸️ Cancelled slow API task")
+            
+            # Collect all results
+            all_papers = []
+            apis_used = []
+            fetch_times = {}
+            
+            for api, task in tasks.items():
+                elapsed = time.time() - start_times[api]
+                fetch_times[api] = round(elapsed, 2)
+                
+                if not task.done():
+                    logger.warning(f"⏰ {api}: Timeout (>{timeout_window}s)")
+                    continue
+                
+                try:
+                    result = task.result()
+                    if result and len(result) > 0:
+                        all_papers.extend(result)
+                        apis_used.append(api)
+                        logger.info(f"✅ {api}: {len(result)} papers in {elapsed:.1f}s")
+                    else:
+                        logger.warning(f"⚠️ {api}: 0 papers in {elapsed:.1f}s")
+                except Exception as e:
+                    logger.error(f"❌ {api} FAILED: {e}")
         
         # Prioritize: Research papers before Wikipedia
         all_papers = self._prioritize_sources(all_papers, apis_used)
         
-        logger.info(f"🏁 Race complete: {len(all_papers)} papers from {len(apis_used)} APIs in <{timeout_window}s")
+        total_elapsed = time.time() - race_start
+        logger.info(f"🏁 Race complete: {len(all_papers)} papers from {len(apis_used)} APIs in {total_elapsed:.1f}s")
         
         return all_papers, apis_used, fetch_times
     
@@ -396,7 +477,7 @@ class DataFetcher:
         Fetch from a specific API.
         
         Args:
-            api_name: "arxiv", "openalex", "semantic_scholar", or "wikipedia"
+            api_name: "arxiv", "openalex", "semantic_scholar", "wikipedia", "pubmed", or "core"
             query: Search query
             max_results: Max results
             
@@ -416,6 +497,10 @@ class DataFetcher:
             # Wikipedia API is async - call directly, returns single Dict or None
             result = await self.wikipedia_api.search(query)
             return [result] if result else []
+        elif api_name == "pubmed":
+            return await self.pubmed.search(query, max_results)
+        elif api_name == "core":
+            return await self.core.search(query, max_results)
         else:
             logger.error(f"❌ Unknown API: {api_name}")
             return []

@@ -90,11 +90,13 @@ class QualityEvaluatorAgent:
         source_breakdown = self._get_source_breakdown(documents)
         real_research_papers = (source_breakdown.get("arxiv", 0) + 
                                 source_breakdown.get("openalex", 0) + 
-                                source_breakdown.get("semantic_scholar", 0))
+                                source_breakdown.get("semantic_scholar", 0) +
+                                source_breakdown.get("pubmed", 0) +  # 🆕 Count PubMed as real
+                                source_breakdown.get("core", 0))     # 🆕 Count CORE as real
         educational_papers = source_breakdown.get("educational", 0)
         
         # Only retry if educational fallback dominates AND we have few real papers
-        if educational_papers > real_research_papers and real_research_papers <3:
+        if educational_papers > real_research_papers and real_research_papers < 3:
             return "retry", quality_score, f"Too many educational fallback results ({educational_papers} educational vs {real_research_papers} real)"
         
         if quality_score < 0.4:
@@ -158,40 +160,69 @@ class QualityEvaluatorAgent:
     
     def _score_relevance(self, query: str, documents: List[dict]) -> float:
         """
-        Basic relevance scoring using keyword overlap.
+        Improved relevance scoring using keyword overlap + title/abstract matching.
         
-        TODO: Use embeddings for semantic similarity in future
+        Enhanced to better detect irrelevant papers (e.g., Martin Buber for "Mendel" query)
         """
-        query_keywords = set(query.lower().split())
+        import re
+        
+        # Extract query keywords (remove common words)
+        stopwords = {'what', 'how', 'why', 'when', 'where', 'who', 'is', 'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for'}
+        query_lower = query.lower()
+        query_keywords = [w for w in re.findall(r'\b\w+\b', query_lower) if w not in stopwords and len(w) > 2]
         
         if not query_keywords:
-            return 0.5  # Neutral score
+            return 0.5  # Neutral score if no meaningful keywords
         
         relevance_scores = []
         
         for doc in documents:
             title = doc.get("title", "").lower()
             abstract = doc.get("abstract", "").lower()
-            content = f"{title} {abstract}"
             
-            # Count keyword overlaps
-            overlaps = sum(1 for kw in query_keywords if kw in content)
-            relevance = overlaps / len(query_keywords)
-            relevance_scores.append(relevance)
+            # Score components:
+            # 1. Exact keyword match in title (highest weight)
+            title_matches = sum(1 for kw in query_keywords if kw in title)
+            title_score = min(title_matches / len(query_keywords), 1.0)
+            
+            # 2. Keyword match in abstract (medium weight)
+            abstract_matches = sum(1 for kw in query_keywords if kw in abstract)
+            abstract_score = min(abstract_matches / len(query_keywords), 1.0)
+            
+            # 3. Any major keyword match (minimum threshold)
+            has_any_match = title_matches > 0 or abstract_matches > 0
+            
+            # Weighted combination
+            doc_relevance = (title_score * 0.6) + (abstract_score * 0.4)
+            
+            # Penalty for completely missing all keywords
+            if not has_any_match:
+                doc_relevance = 0.0  # Completely irrelevant
+            
+            relevance_scores.append(doc_relevance)
         
         # Average relevance across all documents
-        return sum(relevance_scores) / len(relevance_scores) if relevance_scores else 0.0
+        avg_relevance = sum(relevance_scores) / len(relevance_scores) if relevance_scores else 0.0
+        
+        # Log warning if relevance is very low (likely hallucination risk)
+        if avg_relevance < 0.2:
+            logger.warning(f"⚠️ LOW RELEVANCE: Papers don't match query (relevance={avg_relevance:.2f})")
+            logger.warning(f"   Query keywords: {query_keywords}")
+        
+        return avg_relevance
     
     def _get_source_breakdown(self, documents: List[dict]) -> Dict[str, int]:
         """
         Get count of documents by source type.
         
-        🎯 Phase 3: Updated to track arXiv, OpenAlex, Semantic Scholar separately
+        🎯 Updated to track all 6 APIs: arXiv, OpenAlex, Semantic Scholar, PubMed, CORE, Wikipedia
         """
         breakdown = {
             "arxiv": 0,
             "openalex": 0,
             "semantic_scholar": 0,
+            "pubmed": 0,      # 🆕 Track PubMed
+            "core": 0,        # 🆕 Track CORE
             "wikipedia": 0,
             "educational": 0
         }
@@ -205,6 +236,10 @@ class QualityEvaluatorAgent:
                 breakdown["openalex"] += 1
             elif "semantic_scholar" in source:
                 breakdown["semantic_scholar"] += 1
+            elif "pubmed" in source:          # 🆕 Recognize PubMed papers
+                breakdown["pubmed"] += 1
+            elif "core" in source:            # 🆕 Recognize CORE papers
+                breakdown["core"] += 1
             elif "wikipedia" in source:
                 breakdown["wikipedia"] += 1
             else:

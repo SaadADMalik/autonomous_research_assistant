@@ -162,6 +162,9 @@ Question: {query}
 Research:
 {context}
 
+IMPORTANT: If the research papers don't actually answer the question, respond with:
+"I couldn't find relevant research papers for this specific query."
+
 Answer concisely using "research shows", "studies found" etc:"""
         else:
             prompt = f"""You are a research assistant synthesizing findings from academic papers.
@@ -172,11 +175,13 @@ Research Findings:
 {context}
 
 Task: Write a clear, concise answer (150-200 words) that:
-1. Directly addresses the user's question
-2. Synthesizes key findings from the research
-3. Uses natural language (not bullet points or lists)
-4. Cites general patterns (e.g., "studies show", "research found")
-5. If papers don't directly answer the question, explain what they DO cover
+1. FIRST: Check if the research papers actually answer the user's question
+2. If papers are IRRELEVANT or OFF-TOPIC, respond: "I couldn't find relevant research papers for this specific query."
+3. If papers ARE relevant: Synthesize key findings into a natural answer
+4. Use phrases like "research shows", "studies found" when citing findings
+5. Be honest about limitations - don't fabricate connections between query and papers
+
+CRITICAL: Do NOT make up connections. If papers don't match the query, admit it.
 
 Answer:"""
         
@@ -184,6 +189,19 @@ Answer:"""
     
     def _calculate_confidence(self, summary: str, query: str) -> float:
         """Calculate confidence score for LLM output."""
+        # Check if LLM admitted no relevant papers found
+        no_results_phrases = [
+            "couldn't find relevant",
+            "no relevant research",
+            "papers don't match",
+            "not relevant to",
+            "off-topic"
+        ]
+        
+        if any(phrase in summary.lower() for phrase in no_results_phrases):
+            logger.info("⚠️ LLM detected irrelevant papers - returning low confidence")
+            return 0.3  # Low confidence when papers are irrelevant
+        
         # Basic heuristics for confidence
         query_words = set(query.lower().split())
         summary_words = set(summary.lower().split())
