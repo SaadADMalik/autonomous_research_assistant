@@ -70,13 +70,26 @@ def chat():
             processing_time = performance.get('total_time', 0)
             logger.info(f"Response received in {processing_time:.1f}s")
             
+            # Check if educational fallback was used
+            api_status = metadata.get('api_status', {})
+            data_quality = metadata.get('data_quality', {})
+            educational_papers = data_quality.get('educational_content', 0)
+            real_papers = data_quality.get('real_research_papers', 0)
+            
+            # Educational fallback is active if it's only source OR if it's majority source
+            using_educational = (api_status.get('educational_fallback') == 'active') or \
+                              (educational_papers > 0 and real_papers == 0)
+            
             return jsonify({
                 "answer": result.get('result', ''),  # Backend returns 'result', not 'answer'
                 "confidence": result.get('confidence', 0),
                 "session_id": result.get('session_id', session_id),
                 "is_follow_up": result.get('is_follow_up', False),  # At root level, not in metadata
                 "papers_used": sources.get('total_documents', 0),  # Correct path to document count
-                "processing_time": processing_time  # From metadata.performance.total_time
+                "processing_time": processing_time,  # From metadata.performance.total_time
+                "educational_fallback": using_educational,  # ⚠️ NEW: Indicate educational content
+                "real_papers": real_papers,  # Number of actual research papers
+                "educational_count": educational_papers  # Number of educational fallback papers
             })
         else:
             # Backend returned an error

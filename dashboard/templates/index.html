@@ -141,6 +141,12 @@
             color: #047857;
         }
         
+        .badge-warning {
+            background: #fef3c7 !important;
+            color: #92400e !important;
+            border: 1px solid #fbbf24;
+        }
+        
         .typing-indicator {
             display: none;
             padding: 14px 18px;
@@ -410,7 +416,10 @@
                         confidence: data.confidence,
                         is_follow_up: data.is_follow_up,
                         papers_used: data.papers_used,
-                        time: data.processing_time
+                        time: data.processing_time,
+                        educational_fallback: data.educational_fallback,
+                        real_papers: data.real_papers,
+                        educational_count: data.educational_count
                     });
                 } else {
                     showError(data.message || 'An error occurred');
@@ -435,7 +444,14 @@
                 const badges = [];
                 if (meta.is_follow_up) badges.push('<span class="badge">Follow-up</span>');
                 if (meta.confidence) badges.push(`<span class="badge">Confidence: ${(meta.confidence * 100).toFixed(0)}%</span>`);
-                if (meta.papers_used) badges.push(`<span class="badge">${meta.papers_used} papers</span>`);
+                
+                // Show paper breakdown with educational fallback warning
+                if (meta.educational_fallback && meta.educational_count > 0) {
+                    badges.push(`<span class="badge badge-warning">⚠️ ${meta.educational_count} educational papers (APIs returned 0 results)</span>`);
+                } else if (meta.papers_used) {
+                    badges.push(`<span class="badge">${meta.papers_used} papers</span>`);
+                }
+                
                 if (meta.time) badges.push(`<span class="badge">${meta.time.toFixed(1)}s</span>`);
                 
                 if (badges.length > 0) {
