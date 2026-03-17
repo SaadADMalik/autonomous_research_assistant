@@ -22,11 +22,11 @@ class SemanticScholarAPI:
         # Add API key if provided
         if api_key:
             self.headers["x-api-key"] = api_key
-            self.min_request_interval = 1.0
-            logger.info("🔑 Using Semantic Scholar API key")
+            self.min_request_interval = 1.0  # API key: 1 req/second (strict limit)
+            logger.info("🔑 Using Semantic Scholar API key (1 req/sec)")
         else:
-            self.min_request_interval = 2.0
-            logger.info("🔓 Using Semantic Scholar without API key")
+            self.min_request_interval = 3.0  # No key: 3 sec between requests (100 req/5min)
+            logger.info("🔓 Using Semantic Scholar without API key (slower rate)")
         
         self.storage = DataStorage()
         self.last_request_time = 0
